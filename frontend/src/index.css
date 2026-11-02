@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { @apply bg-slate-100 text-slate-800 antialiased; }
+body { font-family: Inter, system-ui, sans-serif; }
+.recharts-cartesian-grid line { stroke: #e2e8f0; }
+.recharts-text { fill: #64748b; font-size: 11px; }
+@keyframes flash { from { background-color: rgb(219 234 254); } to { background-color: transparent; } }
+.row-flash { animation: flash 2.5s ease-out; }

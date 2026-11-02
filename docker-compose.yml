@@ -1,0 +1,36 @@
+# docker compose up -d --build        (simulation + video; add WITH_AI=true for YOLO/OCR)
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: smart_parking
+      POSTGRES_USER: parking
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-parking}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U parking -d smart_parking"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      args:
+        WITH_AI: ${WITH_AI:-false}
+    restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql+psycopg2://parking:${POSTGRES_PASSWORD:-parking}@db:5432/smart_parking
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000}
+      YOLO_DEVICE: ${YOLO_DEVICE:-cpu}
+    ports: ["8000:8000"]
+    volumes:
+      - media:/app/backend/media
+
+volumes:
+  pgdata:
+  media:

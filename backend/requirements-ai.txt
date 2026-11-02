@@ -1,0 +1,8 @@
+# Real ANPR engine (install on the server that processes live camera feeds).
+# Without these packages the system still runs: simulated cameras work fully,
+# and real cameras stream video but report "ANPR engine unavailable".
+-r requirements.txt
+ultralytics==8.3.55          # YOLOv8/YOLO11 vehicle + plate detection
+paddlepaddle==2.6.2          # PaddleOCR runtime (use paddlepaddle-gpu for CUDA)
+paddleocr==2.9.1             # Number plate OCR
+onvif-zeep==0.2.12           # ONVIF device queries (stream URI lookup)

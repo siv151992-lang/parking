@@ -1,0 +1,17 @@
+# /etc/systemd/system/smart-parking.service
+[Unit]
+Description=Smart Parking ANPR API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=parking
+WorkingDirectory=/opt/smart-parking/backend
+EnvironmentFile=/opt/smart-parking/backend/.env
+# Single worker process: camera threads and the WebSocket hub live in this process.
+ExecStart=/opt/smart-parking/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
