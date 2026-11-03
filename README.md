@@ -14,6 +14,31 @@ A **camera simulation mode** lets you run and test everything without camera har
 | Reports | 10 report types → Excel, PDF, CSV, with charts |
 | Deploy | Docker Compose · Linux systemd + nginx · Windows (PowerShell / NSSM) · cloud VM |
 
+## Easiest start (Windows)
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and [Git](https://git-scm.com/download/win).
+2. Download the project: `git clone https://github.com/siv151992-lang/parking.git` (into your user folder, not `C:\Windows\System32`).
+3. Double-click **`start.bat`**. The first start builds everything (10–20 minutes). The browser then opens <http://localhost:8000>; log in as `admin` / `Admin@123`.
+
+| File | What it does |
+|---|---|
+| `start.bat` | Starts Docker Desktop if needed, creates the settings file, builds and starts the app, opens the browser |
+| `stop.bat` | Stops the app (data is kept) |
+| `update.bat` | Downloads the latest version and restarts |
+| `demo-data.bat` | Optional: adds simulated demo cameras and sample history (all marked SIM) |
+
+On macOS / Linux, run `./start.sh` instead.
+
+## Set up your car park
+
+1. **Parking Spaces → Add row**: one entry per row (e.g. *Row A*, 40 spaces).
+2. **Cameras → Add camera**: name, *Camera position*, IP address, username and password. The video address is found automatically.
+   * *Main gate · vehicles coming in / going out*: counts the whole car park.
+   * *Row A · vehicles driving into / leaving the row*: counts the free spaces of Row A.
+3. The **Dashboard** shows the free spaces, the vehicles inside, and the free spaces of every row, live.
+
+If a row camera was offline, correct the row's count under **Parking Spaces → Rows** (the sliders button).
+
 ## Folder structure
 
 ```

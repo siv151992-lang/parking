@@ -17,6 +17,7 @@ from ..models import (
 )
 from . import events, settings_store
 from .alerts import create_alert
+from .rows import rows_snapshot
 
 
 def ensure_capacity_rows(db: Session):
@@ -66,6 +67,7 @@ def snapshot(db: Session) -> dict:
         "available": max(0, total_cap - total_occ),
         "occupancy_pct": round(total_occ * 100 / total_cap, 1) if total_cap else 0.0,
         "categories": categories,
+        "rows": rows_snapshot(db),
     }
 
 

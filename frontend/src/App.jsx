@@ -12,7 +12,7 @@ import Occupancy from "./pages/Occupancy";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import Users from "./pages/Users";
-import { VehicleEntry, VehicleExit } from "./pages/Transactions";
+import InOut from "./pages/InOut";
 import VehicleHistory from "./pages/VehicleHistory";
 
 function Guard({ perm, children }) {
@@ -43,8 +43,8 @@ export default function App() {
           <Route index element={<Guard perm="dashboard.view"><Dashboard /></Guard>} />
           <Route path="live" element={<Guard perm="cameras.view"><LiveMonitoring /></Guard>} />
           <Route path="cameras" element={<Guard perm="cameras.view"><CameraManagement /></Guard>} />
-          <Route path="entries" element={<Guard perm="vehicles.view"><VehicleEntry /></Guard>} />
-          <Route path="exits" element={<Guard perm="vehicles.view"><VehicleExit /></Guard>} />
+          <Route path="entries" element={<Guard perm="vehicles.view"><InOut /></Guard>} />
+          <Route path="exits" element={<Navigate to="/entries?tab=exit" replace />} />
           <Route path="history" element={<Guard perm="vehicles.view"><VehicleHistory /></Guard>} />
           <Route path="occupancy" element={<Guard perm="occupancy.view"><Occupancy /></Guard>} />
           <Route path="reports" element={<Guard perm="reports.view"><Reports /></Guard>} />

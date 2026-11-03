@@ -50,7 +50,7 @@ class DetectionZone(BaseModel):
 
 
 class CameraBase(BaseModel):
-    camera_code: str = Field(min_length=1, max_length=32)
+    camera_code: str = Field("", max_length=32)  # empty: generated (CAM-EN-01, CAM-A-EX-01, ...)
     name: str = Field(min_length=1, max_length=128)
     ip_address: str = ""
     port: int = Field(554, ge=1, le=65535)
@@ -66,6 +66,7 @@ class CameraBase(BaseModel):
     cooldown_seconds: int = Field(60, ge=0, le=3600)
     min_plate_confidence: float = Field(0.6, ge=0.0, le=1.0)
     sim_vehicles_per_minute: float = Field(4.0, gt=0, le=60)
+    row_id: int | None = None  # None: main gate camera; set: camera at the entrance of a parking row
 
 
 class CameraCreate(CameraBase):
@@ -89,6 +90,7 @@ class CameraUpdate(BaseModel):
     cooldown_seconds: int | None = Field(None, ge=0, le=3600)
     min_plate_confidence: float | None = Field(None, ge=0.0, le=1.0)
     sim_vehicles_per_minute: float | None = Field(None, gt=0, le=60)
+    row_id: int | None = None
 
 
 class OnvifProbeIn(BaseModel):
@@ -167,3 +169,22 @@ class SimulateDetectionIn(BaseModel):
     plate_number: str | None = None
     plate_confidence: float = Field(0.92, ge=0, le=1)
     vehicle_type: VehicleTypeT = "CAR"
+
+
+class RowIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    capacity: int = Field(ge=0, le=100000)
+    sort_order: int = 0
+    is_active: bool = True
+
+
+class RowUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=64)
+    capacity: int | None = Field(None, ge=0, le=100000)
+    sort_order: int | None = None
+    is_active: bool | None = None
+
+
+class RowCountIn(BaseModel):
+    count: int = Field(ge=0, le=100000)
+    reason: str = Field("", max_length=255)

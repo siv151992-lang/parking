@@ -12,16 +12,15 @@ import { useToast } from "./ui";
 
 export const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, perm: "dashboard.view" },
-  { to: "/live", label: "Live Camera Monitoring", icon: MonitorPlay, perm: "cameras.view" },
-  { to: "/cameras", label: "Camera Management", icon: Camera, perm: "cameras.view" },
-  { to: "/entries", label: "Vehicle Entry", icon: LogIn, perm: "vehicles.view" },
-  { to: "/exits", label: "Vehicle Exit", icon: LogOut, perm: "vehicles.view" },
+  { to: "/live", label: "Live Cameras", icon: MonitorPlay, perm: "cameras.view" },
+  { to: "/entries", label: "Vehicles In / Out", icon: LogIn, perm: "vehicles.view" },
   { to: "/history", label: "Vehicle History", icon: History, perm: "vehicles.view" },
-  { to: "/occupancy", label: "Parking Occupancy", icon: ParkingSquare, perm: "occupancy.view" },
-  { to: "/reports", label: "Reports & Analytics", icon: BarChart3, perm: "reports.view" },
   { to: "/alerts", label: "Alerts", icon: Bell, perm: "alerts.view" },
-  { to: "/users", label: "User Management", icon: Users, perm: "users.manage" },
-  { to: "/settings", label: "Settings", icon: Settings, perm: "settings.view" },
+  { to: "/reports", label: "Reports", icon: BarChart3, perm: "reports.view" },
+  { to: "/occupancy", label: "Parking Spaces", icon: ParkingSquare, perm: "occupancy.view", group: "Setup" },
+  { to: "/cameras", label: "Cameras", icon: Camera, perm: "cameras.view", group: "Setup" },
+  { to: "/users", label: "Users", icon: Users, perm: "users.manage", group: "Setup" },
+  { to: "/settings", label: "Settings", icon: Settings, perm: "settings.view", group: "Setup" },
 ];
 
 export default function Layout() {
@@ -66,9 +65,12 @@ export default function Layout() {
           </button>
         </div>
         <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
-          {items.map(({ to, label, icon: Icon }) => (
+          {items.map(({ to, label, icon: Icon, group }, i) => (
+            <div key={to}>
+            {group && items[i - 1]?.group !== group && (
+              <p className="px-3 pt-5 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{group}</p>
+            )}
             <NavLink
-              key={to}
               to={to}
               end={to === "/"}
               className={({ isActive }) =>
@@ -81,6 +83,7 @@ export default function Layout() {
                 <span className="text-[10px] font-bold bg-red-500 text-white rounded-full px-1.5 py-0.5">{unread > 99 ? "99+" : unread}</span>
               )}
             </NavLink>
+            </div>
           ))}
         </nav>
         <div className="p-3 border-t border-white/10">

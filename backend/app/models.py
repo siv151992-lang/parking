@@ -1,8 +1,8 @@
 """Database models (PostgreSQL schema).
 
 Tables: users, cameras, vehicles, vehicle_detections, parking_sessions,
-entry_transactions, exit_transactions, parking_capacity, alerts, audit_logs,
-system_settings.
+entry_transactions, exit_transactions, parking_capacity, parking_rows,
+row_presence, alerts, audit_logs, system_settings.
 """
 from datetime import datetime, timezone
 
@@ -92,6 +92,24 @@ class DetectionStatus:
     COOLDOWN = "COOLDOWN"
     FAILED_OCR = "FAILED_OCR"
     REJECTED = "REJECTED"
+    # row cameras (vehicle entering / leaving one parking row)
+    ROW_ENTRY = "ROW_ENTRY"
+    ROW_EXIT = "ROW_EXIT"
+    ROW_IGNORED = "ROW_IGNORED"  # duplicate / cooldown / exit with nothing to close
+
+
+class PresenceStatus:
+    ACTIVE = "ACTIVE"
+    CLOSED = "CLOSED"
+
+
+class PresenceClose:
+    ROW_EXIT = "ROW_EXIT"          # seen by the row's exit camera
+    FUZZY = "FUZZY"                # row exit matched allowing an OCR error
+    UNREAD = "UNREAD"              # row exit matched to an unread / oldest vehicle
+    MOVED = "MOVED"                # seen entering another row
+    GATE_EXIT = "GATE_EXIT"        # left the car park through a gate
+    RESET = "RESET"                # row cleared by an operator
 
 
 class TxSource:
@@ -180,6 +198,8 @@ class Camera(TimestampMixin, Base):
     cooldown_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
     min_plate_confidence: Mapped[float] = mapped_column(Float, default=0.6, nullable=False)
     sim_vehicles_per_minute: Mapped[float] = mapped_column(Float, default=4.0, nullable=False)
+    # None: main gate camera (counts the whole car park). Set: camera at the entrance of one row.
+    row_id: Mapped[int | None] = mapped_column(ForeignKey("parking_rows.id", ondelete="SET NULL"), index=True)
 
     status: Mapped[str] = mapped_column(String(16), default=CameraStatus.OFFLINE, nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -339,6 +359,49 @@ class ParkingCapacity(TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     # NORMAL / WARNING / FULL: last alert level raised, prevents alert spam
     alert_state: Mapped[str] = mapped_column(String(10), default="NORMAL", nullable=False)
+
+
+# ----------------------------------------------------------- parking_rows
+class ParkingRow(TimestampMixin, Base):
+    __tablename__ = "parking_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    capacity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    alert_state: Mapped[str] = mapped_column(String(10), default="NORMAL", nullable=False)
+
+
+# ----------------------------------------------------------- row_presence
+class RowPresence(Base):
+    """One vehicle parked in one row. Row occupancy == ACTIVE presences."""
+    __tablename__ = "row_presence"
+    __table_args__ = (
+        # a plate can be in at most one row at a time
+        Index(
+            "uq_active_presence_per_plate",
+            "plate_number",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE' AND plate_number IS NOT NULL"),
+            sqlite_where=text("status = 'ACTIVE' AND plate_number IS NOT NULL"),
+        ),
+        Index("ix_presence_row_status", "row_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    row_id: Mapped[int] = mapped_column(ForeignKey("parking_rows.id", ondelete="CASCADE"), nullable=False)
+    plate_number: Mapped[str | None] = mapped_column(String(20))
+    vehicle_type: Mapped[str] = mapped_column(String(16), default=VehicleType.CAR, nullable=False)
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("parking_sessions.id", ondelete="SET NULL"), index=True)
+    status: Mapped[str] = mapped_column(String(8), default=PresenceStatus.ACTIVE, nullable=False)
+    entered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    exited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    close_reason: Mapped[str | None] = mapped_column(String(12))
+    entry_camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id", ondelete="SET NULL"))
+    exit_camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id", ondelete="SET NULL"))
+    entry_detection_id: Mapped[int | None] = mapped_column(ForeignKey("vehicle_detections.id", ondelete="SET NULL"))
+    is_simulated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 # ----------------------------------------------------------------- alerts

@@ -42,7 +42,7 @@ function CameraTile({ cam, onExpand }) {
         <span>last: {sinceNow(cam.last_detection_at)}</span>
       </div>
       {cam.runtime?.engine && cam.runtime.engine.startsWith("unavailable") && (
-        <p className="px-3 pb-2 text-[11px] text-amber-400">ANPR engine unavailable — install requirements-ai.txt. Video only.</p>
+        <p className="px-3 pb-2 text-[11px] text-amber-400">Plate reading is off: video only. Add WITH_AI=true to .env and run start.bat again.</p>
       )}
     </div>
   );

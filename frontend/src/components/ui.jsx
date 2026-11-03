@@ -82,6 +82,7 @@ const STATUS_COLORS = {
   VALID: "green", MATCHED: "green", FUZZY_MATCHED: "amber", UNREAD_MATCHED: "amber", MANUAL_MATCHED: "violet",
   AUTO_CLOSED: "amber", UNMATCHED: "red",
   ENTRY_CREATED: "green", EXIT_RECORDED: "blue", DUPLICATE: "orange", COOLDOWN: "slate", FAILED_OCR: "red", REJECTED: "red",
+  ROW_ENTRY: "green", ROW_EXIT: "blue", ROW_IGNORED: "slate",
   CRITICAL: "red", WARNING: "amber", INFO: "blue", ENTRY: "green", EXIT: "orange",
 };
 export const StatusBadge = ({ status }) => <Badge color={STATUS_COLORS[status] || "slate"}>{String(status).replaceAll("_", " ")}</Badge>;

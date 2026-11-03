@@ -1,13 +1,12 @@
-import { useCallback, useState } from "react";
-import { Link } from "react-router-dom";
-import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { ArrowDownToLine, ArrowUpFromLine, Bike, Camera, CameraOff, Car, CircleParking, Gauge, ParkingSquare, ShieldAlert, Truck } from "lucide-react";
+import { useCallback } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { ArrowDownToLine, ArrowUpFromLine, CameraOff, Plus } from "lucide-react";
 import { get } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useEvent, useLiveRefresh } from "../lib/realtime";
-import { fmtNum, fmtTime, sinceNow, VEHICLE_TYPES } from "../lib/format";
-import { Badge, Card, PageHeader, Plate, SERIES, SimBadge, Spinner, StatCard, StatusBadge, Table, Thumb, useFetch } from "../components/ui";
-import { authUrl } from "../lib/api";
-import { OccupancyBar } from "./Occupancy";
+import { fmtNum, fmtTime } from "../lib/format";
+import { Badge, Card, Plate, SimBadge, Spinner, useFetch } from "../components/ui";
+import { RowCard } from "./Rows";
 
 export function ChartTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
@@ -24,118 +23,103 @@ export function ChartTooltip({ active, payload, label }) {
   );
 }
 
-export default function Dashboard() {
-  const stats = useFetch(() => get("/api/dashboard/stats"), []);
-  const hourly = useFetch(() => get("/api/dashboard/hourly"), []);
-  const cams = useFetch(() => get("/api/cameras").catch(() => []), []);
-  const recent = useFetch(() => get("/api/dashboard/recent-detections", { limit: 15 }), []);
-  const [flash, setFlash] = useState(null);
+function BigNumber({ label, value, sub, tone = "text-navy-900" }) {
+  return (
+    <div className="bg-white rounded-xl ring-1 ring-slate-200 p-5">
+      <p className="text-sm font-medium text-slate-500">{label}</p>
+      <p className={`text-5xl font-bold tabular-nums mt-1 ${tone}`}>{value}</p>
+      {sub && <p className="text-sm text-slate-500 mt-1">{sub}</p>}
+    </div>
+  );
+}
 
-  const refreshStats = useCallback(() => {
-    stats.reload();
-    hourly.reload();
-  }, [stats, hourly]);
-  useLiveRefresh(["entry", "exit", "occupancy", "camera_status", "alert", "entry_updated", "exit_updated"], refreshStats, 500);
-  useLiveRefresh(["camera_status"], cams.reload, 300);
+const HIDDEN = new Set(["COOLDOWN", "ROW_IGNORED"]);
+
+function movement(d) {
+  if (d.status === "ROW_ENTRY") return { label: "into row", icon: ArrowDownToLine, cls: "text-emerald-700" };
+  if (d.status === "ROW_EXIT") return { label: "left row", icon: ArrowUpFromLine, cls: "text-orange-700" };
+  if (d.direction === "ENTRY") return { label: "came in", icon: ArrowDownToLine, cls: "text-emerald-700" };
+  return { label: "went out", icon: ArrowUpFromLine, cls: "text-orange-700" };
+}
+
+export default function Dashboard() {
+  const { can } = useAuth();
+  const navigate = useNavigate();
+  const stats = useFetch(() => get("/api/dashboard/stats"), []);
+  const recent = useFetch(() => get("/api/dashboard/recent-detections", { limit: 30 }), []);
+
+  const refresh = useCallback(() => stats.reload(), [stats]);
+  useLiveRefresh(["entry", "exit", "occupancy", "camera_status", "entry_updated", "exit_updated"], refresh, 500);
   useEvent("detection", (d) => {
-    if (d.status === "COOLDOWN") return;
-    recent.setData((rows) => [d, ...(rows || []).filter((r) => r.id !== d.id)].slice(0, 15));
-    setFlash(d.id);
+    if (HIDDEN.has(d.status)) return;
+    recent.setData((rows) => [d, ...(rows || []).filter((r) => r.id !== d.id)].slice(0, 30));
   });
 
   if (stats.loading && !stats.data) return <Spinner />;
   const s = stats.data;
-  if (!s) return <p className="text-red-600">Failed to load dashboard: {stats.error?.message}</p>;
+  if (!s) return <p className="text-red-600">Failed to load: {stats.error?.message}</p>;
+  const rows = s.occupancy.rows || [];
+  const rowFree = rows.reduce((n, r) => n + r.available, 0);
+  const rowTaken = rows.reduce((n, r) => n + r.occupied, 0);
+  const latest = (recent.data || []).filter((d) => !HIDDEN.has(d.status)).slice(0, 8);
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Dashboard" subtitle="Live parking status from ANPR cameras and the transaction database">
-        {s.simulated_cameras > 0 && (
-          <Badge color="violet" title="Some counts come from simulated cameras">
-            {s.simulated_cameras} simulated camera{s.simulated_cameras > 1 ? "s" : ""} · {fmtNum(s.simulated_entries_today)} simulated entries today
-          </Badge>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-bold text-navy-900">Parking now</h1>
+        {s.simulated_cameras > 0 && <Badge color="violet" title="Some numbers come from simulated cameras">includes simulated cameras</Badge>}
+      </div>
+
+      {s.cameras_offline > 0 && (
+        <Link to="/live" className="flex items-center gap-2 rounded-xl bg-red-50 text-red-800 ring-1 ring-red-200 px-4 py-3 text-sm font-medium">
+          <CameraOff size={18} /> {s.cameras_offline} camera{s.cameras_offline > 1 ? "s are" : " is"} offline. Counts may be out of date.
+        </Link>
+      )}
+
+      <div className="grid sm:grid-cols-3 gap-4">
+        <BigNumber label="Free spaces" value={fmtNum(rows.length ? rowFree : s.available_spaces)}
+          tone={(rows.length ? rowFree === 0 : s.available_spaces === 0) ? "text-red-600" : "text-emerald-600"}
+          sub={rows.length ? `in ${rows.length} row${rows.length > 1 ? "s" : ""}` : `of ${fmtNum(s.total_capacity)} spaces`} />
+        <BigNumber label="Vehicles inside" value={fmtNum(s.vehicles_inside)}
+          sub={rows.length ? `${fmtNum(rowTaken)} parked in rows` : `${s.occupancy_pct}% full`} />
+        <BigNumber label="Today" value={<span className="flex items-baseline gap-4 text-4xl">
+          <span className="flex items-center gap-1 text-emerald-700"><ArrowDownToLine size={26} />{fmtNum(s.entries_today)}</span>
+          <span className="flex items-center gap-1 text-orange-700"><ArrowUpFromLine size={26} />{fmtNum(s.exits_today)}</span>
+        </span>} sub="vehicles in · out" />
+      </div>
+
+      <section>
+        <h2 className="text-lg font-semibold text-navy-900 mb-3">Free spaces by row</h2>
+        {rows.length ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+            {rows.map((r) => <RowCard key={r.id} r={r} onClick={can("occupancy.view") ? () => navigate("/occupancy") : undefined} />)}
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl ring-1 ring-slate-200 p-6 text-sm text-slate-600 flex flex-wrap items-center gap-3">
+            No rows set up yet. Add your rows and their number of spaces, then put a camera at each row entrance.
+            {can("occupancy.manage") && <Link to="/occupancy" className="inline-flex items-center gap-1 font-medium text-navy-700 hover:underline"><Plus size={16} /> Add rows</Link>}
+          </div>
         )}
-      </PageHeader>
+      </section>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        <StatCard label="Total Entry Today" value={fmtNum(s.entries_today)} icon={ArrowDownToLine} tone="blue" live />
-        <StatCard label="Total Exit Today" value={fmtNum(s.exits_today)} icon={ArrowUpFromLine} tone="orange" live sub={s.unmatched_exits_today ? `${s.unmatched_exits_today} unmatched` : undefined} />
-        <StatCard label="Vehicles Inside" value={fmtNum(s.vehicles_inside)} icon={CircleParking} tone="navy" live />
-        <StatCard label="Total Capacity" value={fmtNum(s.total_capacity)} icon={ParkingSquare} tone="slate" />
-        <StatCard label="Available Spaces" value={fmtNum(s.available_spaces)} icon={ParkingSquare} tone="green" live />
-        <StatCard label="Occupancy" value={`${s.occupancy_pct}%`} icon={Gauge} tone={s.occupancy_pct >= 90 ? "red" : s.occupancy_pct >= 75 ? "orange" : "green"} live />
-      </div>
-
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        <StatCard label="Cars Today" value={fmtNum(s.cars_today)} icon={Car} tone="slate" sub="entries" />
-        <StatCard label="Two-Wheelers Today" value={fmtNum(s.two_wheelers_today)} icon={Bike} tone="slate" sub="entries" />
-        <StatCard label="Commercial Today" value={fmtNum(s.commercial_today)} icon={Truck} tone="slate" sub="entries" />
-        <StatCard label="Active Cameras" value={`${s.cameras_online}/${s.cameras_total}`} icon={Camera} tone="green" sub={s.cameras_disabled ? `${s.cameras_disabled} disabled` : "online"} />
-        <StatCard label="Offline Cameras" value={fmtNum(s.cameras_offline)} icon={CameraOff} tone={s.cameras_offline ? "red" : "slate"} />
-        <StatCard label="Duplicates Blocked" value={fmtNum(s.duplicates_blocked_today)} icon={ShieldAlert} tone="violet" sub={`of ${fmtNum(s.detections_today)} detections`} />
-      </div>
-
-      <div className="grid xl:grid-cols-3 gap-5">
-        <Card title="Today's traffic by hour" className="xl:col-span-2">
-          <div className="h-72">
-            <ResponsiveContainer>
-              <BarChart data={hourly.data || []} barGap={2} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="hour" tickLine={false} axisLine={false} interval={2} />
-                <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
-                <Tooltip content={<ChartTooltip />} cursor={{ fill: "#f1f5f9" }} />
-                <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="entries" name="Entries" fill={SERIES.entries} radius={[4, 4, 0, 0]} maxBarSize={14} />
-                <Bar dataKey="exits" name="Exits" fill={SERIES.exits} radius={[4, 4, 0, 0]} maxBarSize={14} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
-
-        <Card title="Occupancy by category" action={<Link to="/occupancy" className="text-xs font-medium text-navy-700 hover:underline">Manage</Link>}>
-          <div className="space-y-4">
-            {s.occupancy.categories.map((c) => (
-              <OccupancyBar key={c.category} c={c} />
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid xl:grid-cols-3 gap-5">
-        <Card title="Recent number plate detections" className="xl:col-span-2" bodyClass="p-0"
-          action={<Link to="/history" className="text-xs font-medium text-navy-700 hover:underline">All history</Link>}>
-          <Table
-            rows={recent.data || []}
-            columns={[
-              { key: "img", label: "Plate", render: (d) => <Thumb src={authUrl(d.plate_image)} alt="plate" className="w-20 h-7" /> },
-              { key: "plate_number", label: "Reg. No.", render: (d) => <span className="flex items-center gap-1.5"><Plate value={d.plate_number} /><SimBadge show={d.is_simulated} /></span> },
-              { key: "direction", label: "Dir", render: (d) => <StatusBadge status={d.direction} /> },
-              { key: "vehicle_type", label: "Type", render: (d) => VEHICLE_TYPES[d.vehicle_type] },
-              { key: "camera_name", label: "Camera" },
-              { key: "plate_confidence", label: "Conf.", render: (d) => <span className="tabular-nums">{Math.round(d.plate_confidence * 100)}%</span> },
-              { key: "status", label: "Result", render: (d) => <StatusBadge status={d.status} /> },
-              { key: "detected_at", label: "Time", render: (d) => <span className={d.id === flash ? "row-flash px-1 rounded" : ""}>{fmtTime(d.detected_at)}</span> },
-            ]}
-            empty="No detections yet"
-          />
-        </Card>
-
-        <Card title="ANPR cameras" bodyClass="p-0" action={<Link to="/live" className="text-xs font-medium text-navy-700 hover:underline">Live view</Link>}>
-          <ul className="divide-y divide-slate-100">
-            {(cams.data || []).map((c) => (
-              <li key={c.id} className="px-4 py-3 flex items-center gap-3">
-                <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${c.status === "ONLINE" ? "bg-emerald-500" : c.status === "DISABLED" ? "bg-slate-300" : "bg-red-500"}`} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-800 truncate flex items-center gap-1.5">{c.name} <SimBadge show={c.is_simulated} /></p>
-                  <p className="text-xs text-slate-500">{c.camera_code} · {c.direction} · last detection {sinceNow(c.last_detection_at)}</p>
-                </div>
-                <StatusBadge status={c.status} />
+      <Card title="Latest vehicles" bodyClass="p-0" action={<Link to="/history" className="text-xs font-medium text-navy-700 hover:underline">All vehicles</Link>}>
+        <ul className="divide-y divide-slate-100">
+          {latest.map((d) => {
+            const m = movement(d);
+            return (
+              <li key={d.id} className="px-4 py-2.5 flex items-center gap-2 sm:gap-3 text-sm">
+                <span className="w-28 sm:w-32 shrink-0">{d.plate_number ? <Plate value={d.plate_number} /> : <span className="italic text-slate-400">not read</span>}</span>
+                <span className={`flex items-center gap-1 font-medium sm:w-24 shrink-0 whitespace-nowrap ${m.cls}`}><m.icon size={15} /> {m.label}</span>
+                <span className="text-slate-500 truncate flex-1 min-w-0 hidden sm:block">{d.camera_name}</span>
+                <span className="flex-1 sm:hidden" />
+                <SimBadge show={d.is_simulated} />
+                <span className="text-xs text-slate-500 tabular-nums whitespace-nowrap">{fmtTime(d.detected_at)}</span>
               </li>
-            ))}
-            {cams.data?.length === 0 && <li className="px-4 py-6 text-sm text-slate-400 text-center">No cameras configured</li>}
-          </ul>
-        </Card>
-      </div>
+            );
+          })}
+          {latest.length === 0 && <li className="px-4 py-6 text-sm text-slate-400 text-center">No vehicles yet</li>}
+        </ul>
+      </Card>
     </div>
   );
 }

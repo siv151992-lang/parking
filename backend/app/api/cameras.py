@@ -13,7 +13,7 @@ from ..anpr.sources import OpenCVSource, SourceError, build_stream_url
 from ..anpr.tracker import DEFAULT_ZONE
 from ..database import get_db
 from ..deps import client_ip, require
-from ..models import Camera, CameraStatus
+from ..models import Camera, CameraStatus, Direction, ParkingRow
 from ..schemas import CameraCreate, CameraUpdate, OnvifProbeIn, SimulateDetectionIn, TestStreamIn
 from ..serializers import camera_out
 from ..services import events
@@ -41,12 +41,54 @@ def get_camera(cid: int, db: Session = Depends(get_db), _=Depends(require("camer
     return camera_out(c, camera_manager.runtime(c.id))
 
 
+def _row(db: Session, row_id: int | None) -> ParkingRow | None:
+    if row_id is None:
+        return None
+    row = db.get(ParkingRow, row_id)
+    if row is None:
+        raise HTTPException(400, "Parking row not found")
+    return row
+
+
+def _next_code(db: Session, direction: str, row: ParkingRow | None) -> str:
+    tag = "EN" if direction == Direction.ENTRY else "EX"
+    if row is not None:
+        slug = "".join(ch for ch in row.name.upper() if ch.isalnum())[-6:] or str(row.id)
+        prefix = f"CAM-{slug}-{tag}-"
+    else:
+        prefix = f"CAM-{tag}-"
+    used = {c for (c,) in db.query(Camera.camera_code).filter(Camera.camera_code.like(prefix + "%")).all()}
+    n = 1
+    while f"{prefix}{n:02d}" in used:
+        n += 1
+    return f"{prefix}{n:02d}"
+
+
+def _working_url(rtsp_url: str, username: str, password: str) -> str:
+    """If the login works but the stream path is wrong, find the camera's real path."""
+    if not rtsp_url.lower().startswith("rtsp://"):
+        return rtsp_url
+    url = build_stream_url(rtsp_url, username, password)
+    if rtsp_probe.probe(url, timeout=3)[0] != "path":
+        return rtsp_url
+    found = rtsp_probe.find_stream_url(url)
+    if not found:
+        return rtsp_url
+    p = urlparse(found)
+    return urlunparse(p._replace(netloc=p.hostname + (f":{p.port}" if p.port else "")))
+
+
 @router.post("", status_code=201)
 def create_camera(body: CameraCreate, request: Request, db: Session = Depends(get_db), user=Depends(require("cameras.manage"))):
+    row = _row(db, body.row_id)
+    if not body.camera_code.strip():
+        body.camera_code = _next_code(db, body.direction, row)
     if db.query(Camera).filter(Camera.camera_code == body.camera_code).first():
         raise HTTPException(409, "Camera ID already exists")
     if not body.is_simulated and not body.rtsp_url:
         raise HTTPException(400, "RTSP URL is required for real cameras")
+    if not body.is_simulated:
+        body.rtsp_url = _working_url(body.rtsp_url, body.username, body.password or "")
     data = body.model_dump()
     data["password"] = data.get("password") or ""
     data["detection_zone"] = data.get("detection_zone") or DEFAULT_ZONE
@@ -70,8 +112,16 @@ def update_camera(cid: int, body: CameraUpdate, request: Request, db: Session = 
         raise HTTPException(409, "Camera ID already exists")
     if "password" in changes and not changes["password"]:
         changes.pop("password")  # empty password field = keep existing
+    if "camera_code" in changes and not (changes["camera_code"] or "").strip():
+        changes.pop("camera_code")
+    if "row_id" in changes:
+        _row(db, changes["row_id"])
     for k, v in changes.items():
         setattr(cam, k, v)
+    if not cam.is_simulated and set(changes) & {"rtsp_url", "username", "password"}:
+        fixed = _working_url(cam.rtsp_url, cam.username, cam.password)
+        if fixed != cam.rtsp_url:
+            cam.rtsp_url = changes["rtsp_url"] = fixed
     if not cam.is_enabled:
         cam.status = CameraStatus.DISABLED
     audit(db, user, "UPDATE_CAMERA", "camera", cam.id,

@@ -48,6 +48,7 @@ def camera_out(c: Camera, runtime: dict | None = None) -> dict:
         "cooldown_seconds": c.cooldown_seconds,
         "min_plate_confidence": c.min_plate_confidence,
         "sim_vehicles_per_minute": c.sim_vehicles_per_minute,
+        "row_id": c.row_id,
         "status": c.status,
         "last_seen_at": c.last_seen_at,
         "last_detection_at": c.last_detection_at,

@@ -5,6 +5,7 @@ import { useAuth } from "../lib/auth";
 import { useLiveRefresh } from "../lib/realtime";
 import { fmtNum } from "../lib/format";
 import { Button, Card, Field, Input, Modal, PageHeader, Spinner, StatCard, useFetch, useToast } from "../components/ui";
+import { RowsManager } from "./Rows";
 
 export function OccupancyBar({ c }) {
   const p = Math.min(100, c.occupancy_pct);
@@ -32,9 +33,10 @@ export default function Occupancy() {
   const toast = useToast();
   const occ = useFetch(() => get("/api/occupancy"), []);
   const rec = useFetch(() => get("/api/occupancy/reconcile"), []);
+  const rows = useFetch(() => get("/api/rows"), []);
   const [edit, setEdit] = useState(null);
   const [saving, setSaving] = useState(false);
-  useLiveRefresh(["occupancy", "entry", "exit"], () => { occ.reload(); rec.reload(); }, 400);
+  useLiveRefresh(["occupancy", "entry", "exit"], () => { occ.reload(); rec.reload(); rows.reload(); }, 400);
 
   if (!occ.data) return <Spinner />;
   const o = occ.data;
@@ -57,7 +59,9 @@ export default function Occupancy() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Parking Occupancy" subtitle="Occupied spaces are derived from active parking sessions, so the count can never drift or go negative" />
+      <PageHeader title="Parking Spaces" subtitle="Rows and their number of spaces. Each row is counted by the cameras at its entrance." />
+      <RowsManager rows={rows.data || []} reload={rows.reload} />
+      <h2 className="text-lg font-semibold text-navy-900 pt-2">Whole car park (main gate cameras)</h2>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard label="Total Capacity" value={fmtNum(o.total_capacity)} tone="slate" />
         <StatCard label="Occupied" value={fmtNum(o.occupied)} tone="navy" live />

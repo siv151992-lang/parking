@@ -26,6 +26,23 @@
 
 **Discover ONVIF** scans the local subnet (WS-Discovery multicast) and pre-fills new cameras.
 
+## Row cameras (free spaces row by row)
+
+Create the rows first under **Parking Spaces → Rows** (name and number of spaces). Then add a camera at the entrance of each row and choose its **Camera position**:
+
+* *Row A · vehicles driving into the row*: every vehicle it sees takes one space in Row A.
+* *Row A · vehicles leaving the row*: every vehicle it sees frees one space in Row A.
+
+Each camera counts one direction. For a row entrance that vehicles use both ways, use two cameras: one for vehicles driving in and one for vehicles leaving.
+
+Rules that keep row counts correct:
+
+* A plate already in the row is not counted twice; a vehicle seen entering another row is moved there.
+* A vehicle that leaves through a main gate exit camera is removed from its row.
+* A row exit with an unread plate frees the oldest unread (or oldest) space in that row; a row count never goes below zero.
+* Row cameras do not change the car-park total; only the main gate cameras do.
+* After an outage, correct a row with **Parking Spaces → Rows → Correct count**. The correction is audit-logged.
+
 ## Recommended camera setup for ANPR
 
 * Mount the camera 1.5–3 m high with less than 30° horizontal angle to the plate. Plate width in the image should be at least 130 px.

@@ -10,7 +10,7 @@ const DEFAULT_ZONE = { polygon: [[0.05, 0.25], [0.95, 0.25], [0.95, 0.98], [0.05
 const EMPTY = {
   camera_code: "", name: "", ip_address: "", port: 554, onvif_port: 80, rtsp_url: "", username: "", password: "", location: "",
   direction: "ENTRY", is_simulated: false, is_enabled: true, cooldown_seconds: 60, min_plate_confidence: 0.6, sim_vehicles_per_minute: 4,
-  detection_zone: DEFAULT_ZONE,
+  detection_zone: DEFAULT_ZONE, row_id: null,
 };
 
 // RTSP path templates for common ANPR / IP camera brands
@@ -32,12 +32,21 @@ function cameraUrl(f) {
   return `rtsp://${ip}${port === 554 ? "" : `:${port}`}${b.path}`;
 }
 
-function nextCode(cams, direction) {
-  const prefix = direction === "EXIT" ? "CAM-EX-" : "CAM-EN-";
-  const used = new Set(cams.map((c) => c.camera_code));
-  let n = 1;
-  while (used.has(`${prefix}${String(n).padStart(2, "0")}`)) n += 1;
-  return `${prefix}${String(n).padStart(2, "0")}`;
+// "Camera position" combines the direction with the gate / row the camera watches.
+function positions(rows) {
+  return [
+    { value: "gate:ENTRY", label: "Main gate · vehicles coming in" },
+    { value: "gate:EXIT", label: "Main gate · vehicles going out" },
+    ...rows.flatMap((r) => [
+      { value: `row:${r.id}:ENTRY`, label: `${r.name} · vehicles driving into the row` },
+      { value: `row:${r.id}:EXIT`, label: `${r.name} · vehicles leaving the row` },
+    ]),
+  ];
+}
+const positionOf = (c) => (c.row_id ? `row:${c.row_id}:${c.direction}` : `gate:${c.direction}`);
+function positionLabel(c, rows) {
+  const where = c.row_id ? rows.find((r) => r.id === c.row_id)?.name || "Row" : "Main gate";
+  return `${where} · ${c.direction === "ENTRY" ? "in" : "out"}`;
 }
 
 function ZoneEditor({ zone, onChange }) {
@@ -76,6 +85,7 @@ export default function CameraManagement() {
   const manage = can("cameras.manage");
   const toast = useToast();
   const cams = useFetch(() => get("/api/cameras"), []);
+  const rows = useFetch(() => get("/api/rows").catch(() => []), []);
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [test, setTest] = useState(null);
@@ -98,12 +108,17 @@ export default function CameraManagement() {
     setForm({ ...EMPTY, ...f, ip_address, port, password: "", brand });
   };
   const url = form ? cameraUrl(form) : "";
+  const rowList = rows.data || [];
+  const setPosition = (v) => {
+    const [kind, a, b] = v.split(":");
+    setForm((f) => ({ ...f, row_id: kind === "row" ? Number(a) : null, direction: kind === "row" ? b : a }));
+  };
 
   const save = async () => {
     if (!form.name.trim()) return toast("Enter a camera name", "error");
     if (!form.is_simulated && !url) return toast(form.brand === "other" ? "Enter the RTSP URL" : "Enter the camera IP address", "error");
     setSaving(true);
-    const body = { ...form, camera_code: form.camera_code.trim() || nextCode(cams.data, form.direction),
+    const body = { ...form, camera_code: form.camera_code.trim(),
       rtsp_url: form.is_simulated ? form.rtsp_url : url, port: Number(form.port), onvif_port: Number(form.onvif_port), cooldown_seconds: Number(form.cooldown_seconds),
       min_plate_confidence: Number(form.min_plate_confidence), sim_vehicles_per_minute: Number(form.sim_vehicles_per_minute) };
     delete body.id;
@@ -166,7 +181,7 @@ export default function CameraManagement() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Camera Management" subtitle="IP / ONVIF ANPR cameras over RTSP, plus simulated cameras for testing">
+      <PageHeader title="Cameras" subtitle="Main gate cameras count the whole car park; row cameras count the free spaces of one row">
         {manage && <Button variant="secondary" icon={Radar} onClick={runDiscover}>Discover ONVIF</Button>}
         {manage && <Button icon={Plus} onClick={() => openForm({})}>Add camera</Button>}
       </PageHeader>
@@ -176,7 +191,7 @@ export default function CameraManagement() {
           rows={cams.data}
           columns={[
             { key: "name", label: "Camera", render: (c) => <div><p className="font-medium text-slate-900 flex items-center gap-1.5">{c.name} <SimBadge show={c.is_simulated} /></p><p className="text-xs text-slate-500">{c.camera_code} · {c.location || "—"}</p></div> },
-            { key: "direction", label: "Direction", render: (c) => <StatusBadge status={c.direction} /> },
+            { key: "direction", label: "Position", render: (c) => <span className="text-sm whitespace-nowrap">{positionLabel(c, rowList)}</span> },
             { key: "addr", label: "Address", render: (c) => <span className="text-xs font-mono">{c.is_simulated ? "sim://" : c.ip_address || "—"}</span> },
             { key: "status", label: "Status", render: (c) => <div><StatusBadge status={c.status} />{c.last_error && c.status !== "ONLINE" && <p className="text-[11px] text-red-600 max-w-[220px] truncate" title={c.last_error}>{c.last_error}</p>}</div> },
             { key: "rt", label: "Stream", render: (c) => <span className="text-xs tabular-nums">{c.runtime?.fps ? `${c.runtime.fps} fps · ${c.runtime.reconnects} reconnects` : "—"}</span> },
@@ -200,9 +215,8 @@ export default function CameraManagement() {
           <div className="space-y-4">
             <div className="grid sm:grid-cols-2 gap-3">
               <Field label="Camera name *"><Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Main gate entry" autoFocus /></Field>
-              <Field label="Direction *">
-                <Select value={form.direction} onChange={(e) => set("direction", e.target.value)}
-                  options={[{ value: "ENTRY", label: "Entry (vehicles coming in)" }, { value: "EXIT", label: "Exit (vehicles going out)" }]} />
+              <Field label="Camera position *" hint={rowList.length ? undefined : "Add rows under Parking Spaces to put cameras at row entrances"}>
+                <Select value={positionOf(form)} onChange={(e) => setPosition(e.target.value)} options={positions(rowList)} />
               </Field>
             </div>
 
@@ -212,9 +226,6 @@ export default function CameraManagement() {
               </p>
             ) : (
               <div className="grid sm:grid-cols-2 gap-3">
-                <Field label="Camera brand">
-                  <Select value={form.brand} onChange={(e) => set("brand", e.target.value)} options={BRANDS.map(({ value, label }) => ({ value, label }))} />
-                </Field>
                 {form.brand === "other" ? (
                   <Field label="RTSP URL *" hint="From the camera's manual, e.g. rtsp://192.168.1.64:554/stream1">
                     <Input value={form.rtsp_url} onChange={(e) => set("rtsp_url", e.target.value)} placeholder="rtsp://…" />
@@ -228,6 +239,7 @@ export default function CameraManagement() {
                 <Field label="Password" hint={form.id && form.has_password ? "Leave empty to keep the saved password" : undefined}>
                   <Input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} autoComplete="new-password" />
                 </Field>
+                <p className="text-xs text-slate-500 self-end pb-2">Any brand works: the right video address is found automatically.</p>
                 <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
                   <Button variant="secondary" icon={Wifi} onClick={testStream} disabled={!url} loading={test?.loading}>Test connection</Button>
                   {url && <span className="text-xs text-slate-500 font-mono break-all">{url}</span>}
@@ -251,13 +263,16 @@ export default function CameraManagement() {
               {advanced && (
                 <div className="space-y-4 mt-4">
                   <div className="grid sm:grid-cols-3 gap-3">
-                    <Field label="Camera ID" hint={`Leave empty to use ${nextCode(cams.data.filter((c) => c.id !== form.id), form.direction)}`}>
+                    <Field label="Camera ID" hint="Leave empty to create one automatically">
                       <Input value={form.camera_code} onChange={(e) => set("camera_code", e.target.value)} />
                     </Field>
                     <Field label="Location" className="sm:col-span-2"><Input value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Gate 1 - North" /></Field>
                   </div>
                   {!form.is_simulated && (
                     <div className="grid sm:grid-cols-3 gap-3">
+                      <Field label="Camera brand (video address)" className="sm:col-span-3">
+                        <Select value={form.brand} onChange={(e) => set("brand", e.target.value)} options={BRANDS.map(({ value, label }) => ({ value, label }))} />
+                      </Field>
                       {form.brand !== "other" && <Field label="RTSP port"><Input type="number" value={form.port} onChange={(e) => set("port", e.target.value)} /></Field>}
                       <Field label="ONVIF port"><Input type="number" value={form.onvif_port} onChange={(e) => set("onvif_port", e.target.value)} /></Field>
                       <div className="flex items-end"><Button variant="secondary" className="w-full" icon={Radar} onClick={probe} disabled={!form.ip_address}>Get URL via ONVIF</Button></div>

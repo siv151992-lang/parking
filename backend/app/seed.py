@@ -18,7 +18,8 @@ from sqlalchemy import text
 
 from .database import Base, SessionLocal, engine
 from .main import bootstrap, run_migrations
-from .models import Camera, CameraStatus, Direction, Role, User, Vehicle, VehicleType
+from .models import (Camera, CameraStatus, Direction, ParkingRow, ParkingSession, Role, SessionStatus, User, Vehicle,
+                     VehicleType)
 from .security import hash_password
 from .services import settings_store
 from .services.counting import DetectionEvent, process_detection
@@ -44,14 +45,18 @@ CAMERAS = [
          is_simulated=False, is_enabled=False),
 ]
 
+# parking rows, each with a simulated camera at the row entrance (in) and one at its exit (out)
+ROWS = [("Row A", 40, 1), ("Row B", 30, 2)]
+
 # relative traffic per hour of day (office/mall pattern)
 HOURLY = [1, 1, 1, 1, 1, 2, 4, 9, 14, 12, 9, 8, 9, 8, 7, 7, 8, 10, 12, 9, 6, 4, 2, 1]
 
 
 def reset(db):
-    for t in ["alerts", "audit_logs", "entry_transactions", "exit_transactions", "parking_sessions", "vehicle_detections", "vehicles"]:
+    for t in ["row_presence", "alerts", "audit_logs", "entry_transactions", "exit_transactions", "parking_sessions", "vehicle_detections", "vehicles"]:
         db.execute(text(f"DELETE FROM {t}"))
     db.execute(text("UPDATE parking_capacity SET alert_state='NORMAL'"))
+    db.execute(text("UPDATE parking_rows SET alert_state='NORMAL'"))
     db.commit()
 
 
@@ -73,6 +78,52 @@ def seed_cameras(db) -> dict:
         out[c["camera_code"]] = cam.id
     db.commit()
     return out
+
+
+def seed_rows(db) -> dict:
+    """Rows with simulated row cameras. Returns {row name: (entry camera id, row capacity)}."""
+    out = {}
+    for name, capacity, order in ROWS:
+        row = db.query(ParkingRow).filter(ParkingRow.name == name).first()
+        if not row:
+            row = ParkingRow(name=name, capacity=capacity, sort_order=order)
+            db.add(row)
+            db.flush()
+        letter = name.split()[-1]
+        ids = {}
+        for direction, tag, label in ((Direction.ENTRY, "EN", "in"), (Direction.EXIT, "EX", "out")):
+            code = f"CAM-ROW{letter}-{tag}"
+            cam = db.query(Camera).filter(Camera.camera_code == code).first()
+            if not cam:
+                cam = Camera(camera_code=code, name=f"{name} {label}", direction=direction, location=name, rtsp_url="",
+                             is_simulated=True, sim_vehicles_per_minute=1.5, row_id=row.id, detection_zone=DEFAULT_ZONE,
+                             status=CameraStatus.OFFLINE)
+                db.add(cam)
+                db.flush()
+            ids[direction] = cam.id
+        out[name] = (ids[Direction.ENTRY], capacity)
+    db.commit()
+    return out
+
+
+def fill_rows(db, rows: dict, rng: random.Random):
+    """Park most of the vehicles currently inside in the rows, through the row entry cameras."""
+    parked = (
+        db.query(ParkingSession.plate_number)
+        .filter(ParkingSession.status == SessionStatus.ACTIVE, ParkingSession.plate_number.isnot(None))
+        .order_by(ParkingSession.entry_time)
+        .all()
+    )
+    plates = [p for (p,) in parked]
+    rng.shuffle(plates)
+    now = datetime.now(timezone.utc)
+    for name, (cam_id, capacity) in rows.items():
+        n = min(len(plates), int(capacity * rng.uniform(0.55, 0.8)))
+        for plate in plates[:n]:
+            process_detection(db, cam_id, DetectionEvent(plate_text=plate, plate_confidence=0.95, is_simulated=True,
+                                                         timestamp=now - timedelta(minutes=rng.randint(1, 120))))
+        plates = plates[n:]
+    print("Rows filled:", {k: v[1] for k, v in rows.items()})
 
 
 def seed_vehicles(db, rng):
@@ -166,9 +217,12 @@ def main():
             reset(db)
         seed_users(db)
         cams = seed_cameras(db)
+        rows = seed_rows(db)
         settings_store.invalidate()
         if not args.no_history:
-            seed_history(db, cams, args.days, random.Random(args.seed))
+            rng = random.Random(args.seed)
+            seed_history(db, cams, args.days, rng)
+            fill_rows(db, rows, rng)
         print("Sample data loaded. Logins: admin/Admin@123, manager/Manager@123, operator/Operator@123, viewer/Viewer@123")
     finally:
         db.close()

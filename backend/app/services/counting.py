@@ -29,6 +29,10 @@ from sqlalchemy.orm import Session
 
 from ..models import (
     VEHICLE_TYPE_TO_CATEGORY,
+    ParkingRow,
+    PresenceClose,
+    PresenceStatus,
+    RowPresence,
     AlertType,
     Camera,
     DetectionStatus,
@@ -54,6 +58,7 @@ from .audit import audit
 from .media import save_image
 from .occupancy import check_capacity_alerts, emit_occupancy
 from .plates import is_valid_plate, normalize_plate, plate_distance
+from . import rows as row_service
 from .timeutil import ensure_aware, utcnow
 
 log = logging.getLogger("counting")
@@ -155,6 +160,7 @@ def _close_session(db, session, ts, *, camera=None, detection=None, status=ExitS
     session.status = SessionStatus.CLOSED
     session.exit_time = ts
     session.duration_seconds = max(0, int((ts - ensure_aware(session.entry_time)).total_seconds()))
+    row_service.close_presence_for_session(db, session, ts)
     session.exit_camera_id = camera.id if camera else None
     session.exit_confidence = confidence
     if detection is not None:
@@ -314,6 +320,9 @@ def _process(db: Session, camera_id: int | None, ev: DetectionEvent) -> dict:
     stored_plate = plate if plate_ok else None
     source = TxSource.SIMULATED if ev.is_simulated else TxSource.ANPR
 
+    if camera and camera.row_id:
+        return _process_row(db, cfg, camera, ev, direction, stored_plate, plate_ok, low_conf_text)
+
     # ---- Layer 3: cooldown (same plate, same direction, any camera)
     if plate_ok and camera and camera.cooldown_seconds > 0:
         recent = (
@@ -441,6 +450,101 @@ def _process_exit(db, cfg, camera, ev, direction, plate, plate_ok, low_conf_text
     return {"status": "UNMATCHED", "detection_id": det.id, "transaction_id": tx.id, "plate": plate}
 
 
+# ------------------------------------------------------------ row cameras
+def _active_presence(db, plate, row_id=None):
+    q = db.query(RowPresence).filter(RowPresence.status == PresenceStatus.ACTIVE, RowPresence.plate_number == plate)
+    if row_id is not None:
+        q = q.filter(RowPresence.row_id == row_id)
+    return q.with_for_update().first()
+
+
+def _process_row(db, cfg, camera, ev, direction, plate, plate_ok, low_conf_text):
+    """A camera at the entrance of one parking row: ENTRY = vehicle drove into
+    the row, EXIT = vehicle left the row. Only the row count changes; the car
+    park total is counted by the gate cameras."""
+    row = db.get(ParkingRow, camera.row_id)
+    if row is None:
+        det = _record_detection(db, camera, ev, direction, plate, DetectionStatus.ROW_IGNORED, "Row was deleted", save_images=False)
+        return {"status": DetectionStatus.ROW_IGNORED, "detection_id": det.id}
+
+    def ignored(reason, save_images=False):
+        det = _record_detection(db, camera, ev, direction, plate, DetectionStatus.ROW_IGNORED, reason, save_images=save_images)
+        return {"status": DetectionStatus.ROW_IGNORED, "detection_id": det.id, "plate": plate, "row": row.name, "reason": reason}
+
+    # cooldown: same plate, same row camera direction
+    if plate_ok and camera.cooldown_seconds > 0:
+        recent = (
+            db.query(VehicleDetection.id)
+            .join(Camera, Camera.id == VehicleDetection.camera_id)
+            .filter(
+                Camera.row_id == row.id,
+                VehicleDetection.plate_number == plate,
+                VehicleDetection.direction == direction,
+                VehicleDetection.status.in_([DetectionStatus.ROW_ENTRY, DetectionStatus.ROW_EXIT]),
+                VehicleDetection.detected_at >= ev.timestamp - timedelta(seconds=camera.cooldown_seconds),
+            )
+            .first()
+        )
+        if recent:
+            return ignored(f"Seen within {camera.cooldown_seconds}s cooldown")
+
+    reason = None if plate_ok else ("Low confidence read: " + low_conf_text if low_conf_text else "Plate not readable")
+    if direction == Direction.ENTRY:
+        if plate_ok:
+            current = _active_presence(db, plate)
+            if current is not None and current.row_id == row.id:
+                return ignored(f"Already in {row.name}")
+            if current is not None:  # it drove from another row into this one
+                row_service.close_presence(current, ev.timestamp, PresenceClose.MOVED, camera.id)
+                db.flush()
+        det = _record_detection(db, camera, ev, direction, plate, DetectionStatus.ROW_ENTRY, reason,
+                                needs_review=False, vehicle=_find_vehicle(db, plate) if plate_ok else None)
+        session = _active_session(db, plate) if plate_ok else None
+        p = RowPresence(row_id=row.id, plate_number=plate, vehicle_type=ev.vehicle_type,
+                        session_id=session.id if session else None, status=PresenceStatus.ACTIVE,
+                        entered_at=ev.timestamp, entry_camera_id=camera.id, entry_detection_id=det.id,
+                        is_simulated=ev.is_simulated)
+        db.add(p)
+        db.flush()
+        row_service.check_row_alerts(db, row, ev.is_simulated)
+        emit_occupancy(db)
+        return {"status": DetectionStatus.ROW_ENTRY, "detection_id": det.id, "plate": plate, "row": row.name}
+
+    # EXIT from the row: exact plate, then OCR-fuzzy, then an unread vehicle, then the oldest one
+    active = db.query(RowPresence).filter(RowPresence.row_id == row.id, RowPresence.status == PresenceStatus.ACTIVE)
+    match, how = None, None
+    if plate_ok:
+        match = _active_presence(db, plate, row.id)
+        how = PresenceClose.ROW_EXIT
+        if match is None and cfg["fuzzy_match_enabled"]:
+            max_d = int(cfg["fuzzy_max_distance"])
+            scored = [(plate_distance(plate, x.plate_number), x) for x in active.filter(RowPresence.plate_number.isnot(None)).all()]
+            scored = [t for t in scored if t[0] <= max_d]
+            if scored:
+                best = min(d for d, _ in scored)
+                best_list = [x for d, x in scored if d == best]
+                if len(best_list) == 1:
+                    match, how = best_list[0], PresenceClose.FUZZY
+    if match is None:
+        match = active.filter(RowPresence.plate_number.is_(None)).order_by(RowPresence.entered_at).first()
+        how = PresenceClose.UNREAD
+    if match is None and not plate_ok:
+        # unreadable plate leaving the row: a space was freed, so free the oldest one
+        match = active.order_by(RowPresence.entered_at).first()
+        how = PresenceClose.UNREAD
+    if match is None:
+        return ignored(f"No vehicle to remove from {row.name}" if plate_ok else f"{row.name} is already empty", save_images=True)
+    det = _record_detection(db, camera, ev, direction, plate, DetectionStatus.ROW_EXIT,
+                            reason or (f"Matched to {match.plate_number}" if how == PresenceClose.FUZZY else None),
+                            vehicle=_find_vehicle(db, plate) if plate_ok else None)
+    row_service.close_presence(match, ev.timestamp, how, camera.id)
+    db.flush()
+    row_service.check_row_alerts(db, row, ev.is_simulated)
+    emit_occupancy(db)
+    return {"status": DetectionStatus.ROW_EXIT, "detection_id": det.id, "plate": plate or match.plate_number,
+            "row": row.name, "match": how}
+
+
 # -------------------------------------------------- public: manual operations
 def manual_entry(db: Session, user: User, plate_text: str, vehicle_type: str, ts: datetime | None,
                  camera_id: int | None = None, notes: str = "", ip: str | None = None) -> dict:
@@ -504,6 +608,7 @@ def cancel_entry(db: Session, user: User, entry_id: int, reason: str, ip: str | 
         tx.notes = f"{tx.notes}\nCancelled: {reason}".strip()
         if session:
             session.status = SessionStatus.CANCELLED
+            row_service.close_presence_for_session(db, session, utcnow())
             for ex in db.query(ExitTransaction).filter(ExitTransaction.session_id == session.id).all():
                 if ex.status != ExitStatus.CANCELLED:
                     ex.status = ExitStatus.CANCELLED
@@ -557,6 +662,7 @@ def resolve_unmatched_exit(db: Session, user: User, exit_id: int, session_id: in
         session.exit_time = max(ts, ensure_aware(session.entry_time))
         session.duration_seconds = int((session.exit_time - ensure_aware(session.entry_time)).total_seconds())
         session.exit_camera_id = tx.camera_id
+        row_service.close_presence_for_session(db, session, session.exit_time)
         session.exit_confidence = tx.confidence
         det = db.get(VehicleDetection, tx.detection_id) if tx.detection_id else None
         if det:

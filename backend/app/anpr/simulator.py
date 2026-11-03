@@ -23,7 +23,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from ..models import Direction, ParkingSession, SessionStatus, VehicleType
+from ..models import Camera, Direction, ParkingRow, ParkingSession, PresenceStatus, RowPresence, SessionStatus, VehicleType
 from .sources import SourceError
 from .tracker import Detection
 
@@ -94,7 +94,45 @@ class SimulatedSource:
                 _inflight.discard(v.plate)
 
     # ------------------------------------------------------------- spawning
+    def _pick_row_plate(self, db, row_id: int) -> tuple[str, str]:
+        """Row cameras: vehicles driving into the row are ones already inside the
+        car park and in no row; vehicles leaving it are ones parked in the row."""
+        if self.direction == Direction.ENTRY:
+            row = db.get(ParkingRow, row_id)
+            occupied = db.query(RowPresence).filter(RowPresence.row_id == row_id, RowPresence.status == PresenceStatus.ACTIVE).count()
+            if row is None or occupied >= row.capacity:
+                return "", ""
+            in_rows = db.query(RowPresence.plate_number).filter(RowPresence.status == PresenceStatus.ACTIVE,
+                                                                RowPresence.plate_number.isnot(None))
+            rows = (
+                db.query(ParkingSession.plate_number, ParkingSession.vehicle_type)
+                .filter(ParkingSession.status == SessionStatus.ACTIVE, ParkingSession.is_simulated.is_(True),
+                        ParkingSession.plate_number.isnot(None), ParkingSession.plate_number.notin_(in_rows))
+                .order_by(ParkingSession.entry_time.desc())
+                .limit(40)
+                .all()
+            )
+        else:
+            rows = (
+                db.query(RowPresence.plate_number, RowPresence.vehicle_type)
+                .filter(RowPresence.row_id == row_id, RowPresence.status == PresenceStatus.ACTIVE,
+                        RowPresence.plate_number.isnot(None))
+                .order_by(RowPresence.entered_at)
+                .limit(40)
+                .all()
+            )
+        with _inflight_lock:
+            rows = [r for r in rows if r[0] not in _inflight]
+        return self.rng.choice(rows) if rows else ("", "")
+
     def _pick_plate(self) -> tuple[str, str]:
+        try:
+            with self.session_factory() as db:
+                cam = db.get(Camera, self.camera_id)
+                if cam is not None and cam.row_id:
+                    return self._pick_row_plate(db, cam.row_id)
+        except Exception:
+            return "", ""
         if self.direction == Direction.EXIT and self.rng.random() < 0.9:
             try:
                 with self.session_factory() as db:
