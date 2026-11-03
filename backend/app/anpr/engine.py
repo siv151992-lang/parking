@@ -230,3 +230,15 @@ def localize_plates_opencv(vehicle: np.ndarray) -> list[tuple[int, int, int, int
             out.append((score, (x, y, x + cw, y + ch)))
     out.sort(reverse=True)
     return [b for _, b in out]
+
+
+if __name__ == "__main__":  # python -m app.anpr.engine --preload  (used by the Docker build)
+    import sys
+
+    logging.basicConfig(level=logging.INFO)
+    eng = ANPREngine.get()
+    if not eng.available:
+        sys.exit(f"ANPR engine failed to load: {eng.error}")
+    eng.detect(np.zeros((480, 640, 3), np.uint8))
+    eng._ocr_plate(np.full((60, 240, 3), 255, np.uint8), det=False)
+    print("ANPR engine ready:", ANPREngine.status())
