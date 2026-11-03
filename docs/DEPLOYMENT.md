@@ -9,9 +9,11 @@ Sizing guide (CPU-only, YOLOv8n, every 3rd frame): about 4 cameras per 8-core se
 ```bash
 cp backend/.env.example .env                     # compose reads SECRET_KEY etc. from ./.env
 echo "SECRET_KEY=$(python3 -c 'import secrets;print(secrets.token_urlsafe(48))')" >> .env
-docker compose up -d --build                     # add WITH_AI=true for the YOLO/PaddleOCR engine
+docker compose up -d --build
 docker compose exec app python -m app.seed       # optional sample data
 ```
+
+**Real ANPR engine (needed for real cameras to read plates).** Add `WITH_AI=true` to `.env` and rebuild with `docker compose up -d --build`. The build installs CPU-only PyTorch, YOLO and PaddleOCR (about 10–20 minutes, image about 3 GB) and downloads the models into the image, so it must reach `download.pytorch.org`, `github.com` and `paddleocr.bj.bcebos.com` over HTTPS.
 
 Open `http://SERVER:8000`. Migrations run automatically on start (`AUTO_MIGRATE=true`).
 

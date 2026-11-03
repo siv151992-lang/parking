@@ -1,8 +1,15 @@
 # Real ANPR engine (install on the server that processes live camera feeds).
 # Without these packages the system still runs: simulated cameras work fully,
 # and real cameras stream video but report "ANPR engine unavailable".
+#
+# Needs Python 3.10-3.12. Install CPU-only PyTorch first (the default build pulls GBs of CUDA libraries):
+#   pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu
+#   pip install -r requirements-ai.txt
+# On first start the models are downloaded (YOLO from github.com, PaddleOCR from paddleocr.bj.bcebos.com).
 -r requirements.txt
-ultralytics==8.3.55          # YOLOv8/YOLO11 vehicle + plate detection
-paddlepaddle==2.6.2          # PaddleOCR runtime (use paddlepaddle-gpu for CUDA)
-paddleocr==2.9.1             # Number plate OCR
+ultralytics==8.3.55          # YOLOv8 vehicle (+ optional plate) detection
+paddlepaddle==3.0.0          # PaddleOCR runtime (use paddlepaddle-gpu for CUDA)
+paddleocr==2.10.0            # Number plate OCR
+opencv-python==4.10.0.84     # same version as the headless build, required by ultralytics / paddleocr
+opencv-contrib-python==4.10.0.84
 onvif-zeep==0.2.12           # ONVIF device queries (stream URI lookup)

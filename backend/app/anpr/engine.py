@@ -238,7 +238,11 @@ if __name__ == "__main__":  # python -m app.anpr.engine --preload  (used by the 
     logging.basicConfig(level=logging.INFO)
     eng = ANPREngine.get()
     if not eng.available:
-        sys.exit(f"ANPR engine failed to load: {eng.error}")
+        hint = ""
+        if "download" in (eng.error or "").lower():
+            hint = ("\nThe model download was blocked. This build must reach github.com and paddleocr.bj.bcebos.com "
+                    "over HTTPS (port 443). Allow them in the firewall / proxy, or build on another network.")
+        sys.exit(f"ANPR engine failed to load: {eng.error}{hint}")
     eng.detect(np.zeros((480, 640, 3), np.uint8))
     eng._ocr_plate(np.full((60, 240, 3), 255, np.uint8), det=False)
     print("ANPR engine ready:", ANPREngine.status())
