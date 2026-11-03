@@ -42,12 +42,21 @@ if errorlevel 1 (
 
 rem ---- 3. Build and start
 echo  Building and starting (the first time takes 10-20 minutes)...
+set TRY=1
+:build
 docker compose up -d --build
-if errorlevel 1 (
+if not errorlevel 1 goto :built
+if %TRY% geq 3 (
   echo.
-  echo  The build failed. Scroll up for the error, or send a screenshot of it.
+  echo  The build failed 3 times. Scroll up for the error, or send a screenshot of it.
   goto :fail
 )
+set /a TRY+=1
+echo.
+echo  Build stopped (often a slow download). Trying again, attempt %TRY% of 3. Finished downloads are kept...
+timeout /t 10 /nobreak >nul
+goto :build
+:built
 
 rem ---- 4. Wait until the app answers, then open it
 echo  Waiting for the app...
