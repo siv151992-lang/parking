@@ -235,7 +235,7 @@ export default function CameraManagement() {
                     {test.ok ? (
                       <div className="flex gap-3 items-start"><img src={test.snapshot} alt="Camera snapshot" className="w-48 rounded" /><p className="text-emerald-700">Connected · {test.width}×{test.height} · {test.fps} fps. Click Save camera.</p></div>
                     ) : (
-                      <p className="text-red-600">Could not connect: {test.error}. Check the IP address, username, password and brand.</p>
+                      <p className="text-red-600">Could not connect: {test.error}</p>
                     )}
                   </div>
                 )}

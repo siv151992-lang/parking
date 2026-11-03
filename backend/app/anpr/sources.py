@@ -65,7 +65,14 @@ class OpenCVSource:
         self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
         if not self.cap.isOpened():
             self.cap.release()
-            raise SourceError(f"Unable to open stream {redact_url(self.url)}")
+            if self.is_file:
+                raise SourceError(f"Unable to open video file {self.url}")
+            from .rtsp_probe import diagnose
+            reason = diagnose(self.url) if self.url.lower().startswith("rtsp://") else None
+            raise SourceError(reason or (
+                f"The camera accepted the login, but the video of {redact_url(self.url)} could not be decoded. "
+                "Set the camera's video encoding to H.264, or try the sub-stream (e.g. channel 102)."
+                if self.url.lower().startswith("rtsp://") else f"Unable to open stream {redact_url(self.url)}"))
         ok, frame = self.cap.read()
         if not ok or frame is None:
             self.cap.release()
