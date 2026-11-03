@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pencil, Plus, Power, Radar, RotateCw, Trash2, Wifi } from "lucide-react";
+import { ChevronDown, Pencil, Plus, Power, Radar, RotateCw, Trash2, Wifi } from "lucide-react";
 import { del, get, post, put } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useLiveRefresh } from "../lib/realtime";
@@ -12,6 +12,33 @@ const EMPTY = {
   direction: "ENTRY", is_simulated: false, is_enabled: true, cooldown_seconds: 60, min_plate_confidence: 0.6, sim_vehicles_per_minute: 4,
   detection_zone: DEFAULT_ZONE,
 };
+
+// RTSP path templates for common ANPR / IP camera brands
+const BRANDS = [
+  { value: "hikvision", label: "Hikvision / HiLook", path: "/Streaming/Channels/101", match: /\/Streaming\/Channels\//i },
+  { value: "dahua", label: "Dahua / CP Plus / Amcrest", path: "/cam/realmonitor?channel=1&subtype=0", match: /\/cam\/realmonitor/i },
+  { value: "uniview", label: "Uniview", path: "/unicast/c1/s0/live", match: /\/unicast\//i },
+  { value: "axis", label: "Axis", path: "/axis-media/media.amp", match: /\/axis-media\//i },
+  { value: "other", label: "Other (enter RTSP URL)" },
+];
+const detectBrand = (url) => (url ? BRANDS.find((b) => b.match?.test(url))?.value || "other" : "hikvision");
+
+function cameraUrl(f) {
+  if (f.brand === "other") return f.rtsp_url.trim();
+  const b = BRANDS.find((x) => x.value === f.brand);
+  const ip = f.ip_address.trim();
+  if (!ip) return "";
+  const port = Number(f.port) || 554;
+  return `rtsp://${ip}${port === 554 ? "" : `:${port}`}${b.path}`;
+}
+
+function nextCode(cams, direction) {
+  const prefix = direction === "EXIT" ? "CAM-EX-" : "CAM-EN-";
+  const used = new Set(cams.map((c) => c.camera_code));
+  let n = 1;
+  while (used.has(`${prefix}${String(n).padStart(2, "0")}`)) n += 1;
+  return `${prefix}${String(n).padStart(2, "0")}`;
+}
 
 function ZoneEditor({ zone, onChange }) {
   const z = zone || DEFAULT_ZONE;
@@ -53,16 +80,35 @@ export default function CameraManagement() {
   const [saving, setSaving] = useState(false);
   const [test, setTest] = useState(null);
   const [discover, setDiscover] = useState(null);
+  const [advanced, setAdvanced] = useState(false);
   useLiveRefresh(["camera_status", "detection"], cams.reload, 1500);
 
   if (!cams.data) return <Spinner />;
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const openForm = (f) => {
+    setTest(null);
+    setAdvanced(false);
+    const brand = f.id ? detectBrand(f.rtsp_url) : "hikvision";
+    let { ip_address = "", port = 554 } = f;
+    if (brand !== "other" && f.rtsp_url) {
+      // take the host and port from the saved URL so the rebuilt URL matches it
+      const m = f.rtsp_url.match(/^rtsp:\/\/(?:[^@/]*@)?([^:/?]+)(?::(\d+))?/i);
+      if (m) { ip_address = m[1]; port = Number(m[2]) || 554; }
+    }
+    setForm({ ...EMPTY, ...f, ip_address, port, password: "", brand });
+  };
+  const url = form ? cameraUrl(form) : "";
 
   const save = async () => {
+    if (!form.name.trim()) return toast("Enter a camera name", "error");
+    if (!form.is_simulated && !url) return toast(form.brand === "other" ? "Enter the RTSP URL" : "Enter the camera IP address", "error");
     setSaving(true);
-    const body = { ...form, port: Number(form.port), onvif_port: Number(form.onvif_port), cooldown_seconds: Number(form.cooldown_seconds),
+    const body = { ...form, camera_code: form.camera_code.trim() || nextCode(cams.data, form.direction),
+      rtsp_url: form.is_simulated ? form.rtsp_url : url, port: Number(form.port), onvif_port: Number(form.onvif_port), cooldown_seconds: Number(form.cooldown_seconds),
       min_plate_confidence: Number(form.min_plate_confidence), sim_vehicles_per_minute: Number(form.sim_vehicles_per_minute) };
     delete body.id;
+    delete body.brand;
+    if (form.id && !body.password) delete body.password;
     try {
       if (form.id) await put(`/api/cameras/${form.id}`, body);
       else await post("/api/cameras", body);
@@ -79,7 +125,7 @@ export default function CameraManagement() {
   const testStream = async () => {
     setTest({ loading: true });
     try {
-      setTest(await post("/api/cameras/test-stream", { rtsp_url: form.rtsp_url, username: form.username, password: form.password || "" }));
+      setTest(await post("/api/cameras/test-stream", { rtsp_url: url, username: form.username, password: form.password || "" }));
     } catch (e) {
       setTest({ ok: false, error: e.message });
     }
@@ -98,7 +144,7 @@ export default function CameraManagement() {
     try {
       const r = await post("/api/cameras/onvif/probe", { ip_address: form.ip_address, onvif_port: Number(form.onvif_port), username: form.username, password: form.password || "" });
       if (r.profiles?.length) {
-        set("rtsp_url", r.profiles[0].rtsp_url);
+        setForm((f) => ({ ...f, brand: "other", rtsp_url: r.profiles[0].rtsp_url }));
         toast(`Found ${r.profiles.length} stream profile(s); using "${r.profiles[0].profile}"`, "success");
       } else toast("No stream profiles returned", "warning");
     } catch (e) {
@@ -120,7 +166,7 @@ export default function CameraManagement() {
     <div className="space-y-5">
       <PageHeader title="Camera Management" subtitle="IP / ONVIF ANPR cameras over RTSP, plus simulated cameras for testing">
         {manage && <Button variant="secondary" icon={Radar} onClick={runDiscover}>Discover ONVIF</Button>}
-        {manage && <Button icon={Plus} onClick={() => { setTest(null); setForm({ ...EMPTY }); }}>Add camera</Button>}
+        {manage && <Button icon={Plus} onClick={() => openForm({})}>Add camera</Button>}
       </PageHeader>
 
       <Card bodyClass="p-0">
@@ -136,7 +182,7 @@ export default function CameraManagement() {
             { key: "cfg", label: "Cooldown / Min conf", render: (c) => <span className="text-xs">{c.cooldown_seconds}s · {Math.round(c.min_plate_confidence * 100)}%</span> },
             ...(manage ? [{ key: "actions", label: "", render: (c) => (
               <div className="flex gap-1 justify-end">
-                <Button size="sm" variant="ghost" icon={Pencil} title="Edit" onClick={() => { setTest(null); setForm({ ...EMPTY, ...c, password: "" }); }} />
+                <Button size="sm" variant="ghost" icon={Pencil} title="Edit" onClick={() => openForm(c)} />
                 <Button size="sm" variant="ghost" icon={RotateCw} title="Restart / reconnect" onClick={() => act(() => post(`/api/cameras/${c.id}/restart`), "Restarting camera")} />
                 <Button size="sm" variant="ghost" icon={Power} title={c.is_enabled ? "Disable" : "Enable"} onClick={() => act(() => put(`/api/cameras/${c.id}`, { is_enabled: !c.is_enabled }), c.is_enabled ? "Camera disabled" : "Camera enabled")} />
                 <Button size="sm" variant="ghost" icon={Trash2} title="Delete" onClick={() => window.confirm(`Delete camera ${c.name}? Historic transactions are kept.`) && act(() => del(`/api/cameras/${c.id}`), "Camera deleted")} />
@@ -149,52 +195,87 @@ export default function CameraManagement() {
       <Modal open={!!form} onClose={() => setForm(null)} title={form?.id ? `Edit ${form.name}` : "Add camera"} wide
         footer={<><Button variant="secondary" onClick={() => setForm(null)}>Cancel</Button><Button onClick={save} loading={saving}>Save camera</Button></>}>
         {form && (
-          <div className="space-y-5">
-            <div className="flex gap-2">
-              {[[false, "Real IP camera (RTSP)"], [true, "Simulated camera"]].map(([v, label]) => (
-                <button key={label} onClick={() => set("is_simulated", v)} className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium ring-1 ${form.is_simulated === v ? "bg-navy-900 text-white ring-navy-900" : "ring-slate-300 text-slate-600"}`}>{label}</button>
-              ))}
+          <div className="space-y-4">
+            <div className="grid sm:grid-cols-2 gap-3">
+              <Field label="Camera name *"><Input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Main gate entry" autoFocus /></Field>
+              <Field label="Direction *">
+                <Select value={form.direction} onChange={(e) => set("direction", e.target.value)}
+                  options={[{ value: "ENTRY", label: "Entry (vehicles coming in)" }, { value: "EXIT", label: "Exit (vehicles going out)" }]} />
+              </Field>
             </div>
-            <div className="grid sm:grid-cols-3 gap-3">
-              <Field label="Camera ID *"><Input value={form.camera_code} onChange={(e) => set("camera_code", e.target.value)} placeholder="CAM-EN-03" /></Field>
-              <Field label="Camera name *"><Input value={form.name} onChange={(e) => set("name", e.target.value)} /></Field>
-              <Field label="Direction *"><Select value={form.direction} onChange={(e) => set("direction", e.target.value)} options={[{ value: "ENTRY", label: "ENTRY" }, { value: "EXIT", label: "EXIT" }]} /></Field>
-              <Field label="Location" className="sm:col-span-3"><Input value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Gate 1 - North" /></Field>
-            </div>
-            {!form.is_simulated ? (
-              <div className="grid sm:grid-cols-4 gap-3">
-                <Field label="IP address"><Input value={form.ip_address} onChange={(e) => set("ip_address", e.target.value)} placeholder="192.168.1.120" /></Field>
-                <Field label="RTSP port"><Input type="number" value={form.port} onChange={(e) => set("port", e.target.value)} /></Field>
-                <Field label="ONVIF port"><Input type="number" value={form.onvif_port} onChange={(e) => set("onvif_port", e.target.value)} /></Field>
-                <div className="flex items-end"><Button variant="secondary" className="w-full" icon={Radar} onClick={probe} disabled={!form.ip_address}>Get RTSP via ONVIF</Button></div>
-                <Field label="RTSP URL *" className="sm:col-span-4" hint="e.g. rtsp://192.168.1.120:554/Streaming/Channels/101 (Hikvision) · rtsp://IP:554/cam/realmonitor?channel=1&subtype=0 (Dahua). A local video file path also works for testing.">
-                  <Input value={form.rtsp_url} onChange={(e) => set("rtsp_url", e.target.value)} />
+
+            {form.is_simulated ? (
+              <p className="text-sm bg-violet-50 text-violet-800 rounded-lg p-3">
+                This is a <b>simulated test camera</b>. It generates fake traffic, and everything it records is labelled <b>SIM</b>. Change this under Advanced settings.
+              </p>
+            ) : (
+              <div className="grid sm:grid-cols-2 gap-3">
+                <Field label="Camera brand">
+                  <Select value={form.brand} onChange={(e) => set("brand", e.target.value)} options={BRANDS.map(({ value, label }) => ({ value, label }))} />
                 </Field>
-                <Field label="Username"><Input value={form.username} onChange={(e) => set("username", e.target.value)} autoComplete="off" /></Field>
-                <Field label="Password" hint={form.id && form.has_password ? "Leave empty to keep the stored password" : undefined}><Input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} autoComplete="new-password" /></Field>
-                <div className="sm:col-span-2 flex items-end"><Button variant="secondary" icon={Wifi} onClick={testStream} disabled={!form.rtsp_url} loading={test?.loading}>Test connection</Button></div>
+                {form.brand === "other" ? (
+                  <Field label="RTSP URL *" hint="From the camera's manual, e.g. rtsp://192.168.1.64:554/stream1">
+                    <Input value={form.rtsp_url} onChange={(e) => set("rtsp_url", e.target.value)} placeholder="rtsp://…" />
+                  </Field>
+                ) : (
+                  <Field label="Camera IP address *" hint="Shown in the camera's web page or your router">
+                    <Input value={form.ip_address} onChange={(e) => set("ip_address", e.target.value)} placeholder="192.168.1.64" />
+                  </Field>
+                )}
+                <Field label="Username"><Input value={form.username} onChange={(e) => set("username", e.target.value)} placeholder="admin" autoComplete="off" /></Field>
+                <Field label="Password" hint={form.id && form.has_password ? "Leave empty to keep the saved password" : undefined}>
+                  <Input type="password" value={form.password} onChange={(e) => set("password", e.target.value)} autoComplete="new-password" />
+                </Field>
+                <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+                  <Button variant="secondary" icon={Wifi} onClick={testStream} disabled={!url} loading={test?.loading}>Test connection</Button>
+                  {url && <span className="text-xs text-slate-500 font-mono break-all">{url}</span>}
+                </div>
                 {test && !test.loading && (
-                  <div className="sm:col-span-4 text-sm">
+                  <div className="sm:col-span-2 text-sm">
                     {test.ok ? (
-                      <div className="flex gap-3 items-start"><img src={test.snapshot} alt="snapshot" className="w-48 rounded" /><p className="text-emerald-700">Connected · {test.width}×{test.height} · {test.fps} fps</p></div>
-                    ) : <p className="text-red-600">Connection failed: {test.error}</p>}
+                      <div className="flex gap-3 items-start"><img src={test.snapshot} alt="Camera snapshot" className="w-48 rounded" /><p className="text-emerald-700">Connected · {test.width}×{test.height} · {test.fps} fps. Click Save camera.</p></div>
+                    ) : (
+                      <p className="text-red-600">Could not connect: {test.error}. Check the IP address, username, password and brand.</p>
+                    )}
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="grid sm:grid-cols-3 gap-3">
-                <Field label="Simulated vehicles per minute" hint="Average arrival rate rendered by the simulator"><Input type="number" step="0.5" min="0.5" value={form.sim_vehicles_per_minute} onChange={(e) => set("sim_vehicles_per_minute", e.target.value)} /></Field>
-                <p className="sm:col-span-2 text-xs text-slate-500 self-center bg-violet-50 text-violet-800 rounded-lg p-3">
-                  Simulated cameras render synthetic traffic with realistic OCR noise. All their detections and transactions are flagged <b>SIMULATED</b> and can be excluded from reports.
-                </p>
-              </div>
             )}
-            <div className="grid sm:grid-cols-3 gap-3">
-              <Field label="Cooldown (seconds)" hint="Same plate in the same direction is ignored within this window"><Input type="number" min="0" value={form.cooldown_seconds} onChange={(e) => set("cooldown_seconds", e.target.value)} /></Field>
-              <Field label="Min. plate confidence" hint="Reads below this are counted but flagged unread"><Input type="number" step="0.05" min="0" max="1" value={form.min_plate_confidence} onChange={(e) => set("min_plate_confidence", e.target.value)} /></Field>
-              <label className="flex items-center gap-2 text-sm self-end pb-2"><input type="checkbox" checked={form.is_enabled} onChange={(e) => set("is_enabled", e.target.checked)} /> Enabled</label>
+
+            <div className="border-t border-slate-200 pt-3">
+              <button type="button" onClick={() => setAdvanced((v) => !v)} className="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-slate-900">
+                <ChevronDown size={16} className={`transition-transform ${advanced ? "rotate-180" : ""}`} /> Advanced settings
+              </button>
+              {advanced && (
+                <div className="space-y-4 mt-4">
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    <Field label="Camera ID" hint={`Leave empty to use ${nextCode(cams.data.filter((c) => c.id !== form.id), form.direction)}`}>
+                      <Input value={form.camera_code} onChange={(e) => set("camera_code", e.target.value)} />
+                    </Field>
+                    <Field label="Location" className="sm:col-span-2"><Input value={form.location} onChange={(e) => set("location", e.target.value)} placeholder="Gate 1 - North" /></Field>
+                  </div>
+                  {!form.is_simulated && (
+                    <div className="grid sm:grid-cols-3 gap-3">
+                      {form.brand !== "other" && <Field label="RTSP port"><Input type="number" value={form.port} onChange={(e) => set("port", e.target.value)} /></Field>}
+                      <Field label="ONVIF port"><Input type="number" value={form.onvif_port} onChange={(e) => set("onvif_port", e.target.value)} /></Field>
+                      <div className="flex items-end"><Button variant="secondary" className="w-full" icon={Radar} onClick={probe} disabled={!form.ip_address}>Get URL via ONVIF</Button></div>
+                    </div>
+                  )}
+                  {form.is_simulated && (
+                    <Field label="Simulated vehicles per minute" className="sm:w-1/3"><Input type="number" step="0.5" min="0.5" value={form.sim_vehicles_per_minute} onChange={(e) => set("sim_vehicles_per_minute", e.target.value)} /></Field>
+                  )}
+                  <div className="grid sm:grid-cols-3 gap-3">
+                    <Field label="Cooldown (seconds)" hint="Same plate in the same direction is ignored within this window"><Input type="number" min="0" value={form.cooldown_seconds} onChange={(e) => set("cooldown_seconds", e.target.value)} /></Field>
+                    <Field label="Min. plate confidence" hint="Reads below this are counted but flagged unread"><Input type="number" step="0.05" min="0" max="1" value={form.min_plate_confidence} onChange={(e) => set("min_plate_confidence", e.target.value)} /></Field>
+                    <div className="space-y-2 self-end pb-2 text-sm">
+                      <label className="flex items-center gap-2"><input type="checkbox" checked={form.is_enabled} onChange={(e) => set("is_enabled", e.target.checked)} /> Enabled</label>
+                      <label className="flex items-center gap-2"><input type="checkbox" checked={form.is_simulated} onChange={(e) => set("is_simulated", e.target.checked)} /> Simulated test camera</label>
+                    </div>
+                  </div>
+                  <ZoneEditor zone={form.detection_zone} onChange={(z) => set("detection_zone", z)} />
+                </div>
+              )}
             </div>
-            <ZoneEditor zone={form.detection_zone} onChange={(z) => set("detection_zone", z)} />
           </div>
         )}
       </Modal>
@@ -207,7 +288,7 @@ export default function CameraManagement() {
             {discover.devices.map((d) => (
               <li key={d.ip_address} className="py-2 flex items-center gap-3 text-sm">
                 <div className="flex-1"><p className="font-medium">{d.name || "ONVIF camera"} <Badge>{d.hardware}</Badge></p><p className="text-xs text-slate-500 font-mono">{d.ip_address}:{d.onvif_port}</p></div>
-                <Button size="sm" onClick={() => { setDiscover(null); setTest(null); setForm({ ...EMPTY, ip_address: d.ip_address, onvif_port: d.onvif_port, name: d.name || "" }); }}>Add</Button>
+                <Button size="sm" onClick={() => { setDiscover(null); openForm({ ip_address: d.ip_address, onvif_port: d.onvif_port, name: d.name || "" }); }}>Add</Button>
               </li>
             ))}
           </ul>
