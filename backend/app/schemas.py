@@ -102,6 +102,7 @@ class TestStreamIn(BaseModel):
     rtsp_url: str
     username: str = ""
     password: str = ""
+    camera_id: int | None = None  # when editing: use the saved password if none is typed
 
 
 class ManualEntryIn(BaseModel):

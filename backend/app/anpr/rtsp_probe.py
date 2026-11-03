@@ -65,12 +65,47 @@ def _request(sock: socket.socket, uri: str, cseq: int, auth: str | None) -> tupl
     return int(m.group(1)), m.group(2), headers
 
 
+# Stream paths used by common IP / ANPR camera brands, most common first.
+CANDIDATE_PATHS = [
+    "/Streaming/Channels/101", "/Streaming/Channels/1", "/Streaming/channels/101", "/ISAPI/Streaming/channels/101",
+    "/h264/ch1/main/av_stream", "/Streaming/Channels/201", "/Streaming/Channels/102",          # Hikvision / HiLook / NVR
+    "/cam/realmonitor?channel=1&subtype=0", "/cam/realmonitor?channel=1&subtype=1",              # Dahua / CP Plus / Amcrest
+    "/unicast/c1/s0/live", "/media/video1", "/media/video0",                                    # Uniview
+    "/axis-media/media.amp",                                                                     # Axis
+    "/h264Preview_01_main", "/Preview_01_main",                                                  # Reolink
+    "/live/ch00_0", "/live/ch0", "/live/main", "/live1.sdp", "/live.sdp", "/live",               # many OEMs
+    "/stream1", "/stream0", "/main", "/ch01/0", "/ch0_0.h264", "/11", "/1", "/0",
+    "/onvif1", "/profile1", "/media1", "/av0_0", "/videoMain", "/video1", "/cam1/h264", "/",
+]
+
+
+def find_stream_url(url: str, timeout: float = 3.0) -> str | None:
+    """Try the known stream paths on the camera of ``url`` (with credentials)
+    and return the first URL the camera accepts, or None."""
+    p = urlparse(url)
+    for path in CANDIDATE_PATHS:
+        path_part, _, query = path.partition("?")
+        candidate = urlunparse(p._replace(path=path_part, query=query, params="", fragment=""))
+        kind, _ = probe(candidate, timeout)
+        if kind == "ok":
+            return candidate
+        if kind in ("unreachable", "auth"):
+            return None
+    return None
+
+
 def diagnose(url: str, timeout: float = 4.0) -> str | None:
     """Return a plain-language reason the stream fails, or None if the camera
     accepted the login and the stream path (the problem is then decoding)."""
+    return probe(url, timeout)[1]
+
+
+def probe(url: str, timeout: float = 4.0) -> tuple[str, str | None]:
+    """Classify an RTSP URL: ("ok", None), or (kind, reason) where kind is
+    unreachable / auth / path / other."""
     p = urlparse(url)
     if p.scheme.lower() != "rtsp" or not p.hostname:
-        return None
+        return "ok", None
     host, port = p.hostname, p.port or 554
     user, password = unquote(p.username or ""), unquote(p.password or "")
     netloc = host + (f":{p.port}" if p.port else "")
@@ -79,41 +114,41 @@ def diagnose(url: str, timeout: float = 4.0) -> str | None:
     try:
         sock = socket.create_connection((host, port), timeout=timeout)
     except socket.timeout:
-        return (f"No answer from {host}:{port}. The camera is switched off, the IP address is wrong, "
+        return "unreachable", (f"No answer from {host}:{port}. The camera is switched off, the IP address is wrong, "
                 f"or this server is not on the camera's network.")
     except ConnectionRefusedError:
-        return (f"{host} is reachable but refused port {port}. RTSP is disabled on the camera "
+        return "unreachable", (f"{host} is reachable but refused port {port}. RTSP is disabled on the camera "
                 f"or it uses a different RTSP port.")
     except OSError as e:
-        return f"Cannot reach {host}:{port} ({e.strerror or e}). Check the IP address and the network."
+        return "unreachable", f"Cannot reach {host}:{port} ({e.strerror or e}). Check the IP address and the network."
 
     try:
         sock.settimeout(timeout)
         code, reason, headers = _request(sock, uri, 1, None)
         if code == 401:
             if not user:
-                return "The camera requires a username and password."
+                return "auth", "The camera requires a username and password."
             challenges = headers.get("www-authenticate", [])
             challenge = next((c for c in challenges if c.lower().startswith("digest")), challenges[0] if challenges else "")
             auth = _auth_header(challenge, user, password, "DESCRIBE", uri)
             if auth is None:
-                return f"The camera asked for an unsupported login method ({challenge.split(' ', 1)[0]})."
+                return "auth", f"The camera asked for an unsupported login method ({challenge.split(' ', 1)[0]})."
             code, reason, headers = _request(sock, uri, 2, auth)
             if code == 401:
-                return ("Wrong username or password. Note: many cameras lock the account for several "
+                return "auth", ("Wrong username or password. Note: many cameras lock the account for several "
                         "minutes after repeated failed logins.")
         if code == 200:
-            return None
+            return "ok", None
         if code == 404:
-            return f"Login OK, but the stream path {p.path or '/'} does not exist. Choose another camera brand or enter the RTSP URL."
+            return "path", f"Login OK, but the stream path {p.path or '/'} does not exist. Choose another camera brand or enter the RTSP URL."
         if code in (403,):
-            return "The camera rejected this user (403). Give the user live-view / RTSP permission in the camera's settings."
+            return "auth", "The camera rejected this user (403). Give the user live-view / RTSP permission in the camera's settings."
         if code == 454 or code == 400:
-            return f"The camera rejected the stream path ({code} {reason}). Choose another camera brand or enter the RTSP URL."
-        return f"The camera answered RTSP {code} {reason}."
+            return "path", f"The camera rejected the stream path ({code} {reason}). Choose another camera brand or enter the RTSP URL."
+        return "other", f"The camera answered RTSP {code} {reason}."
     except socket.timeout:
-        return f"{host}:{port} accepted the connection but did not answer RTSP. Check the RTSP port."
+        return "unreachable", f"{host}:{port} accepted the connection but did not answer RTSP. Check the RTSP port."
     except (OSError, ValueError):
-        return f"{host}:{port} is not an RTSP server. Check the RTSP port."
+        return "unreachable", f"{host}:{port} is not an RTSP server. Check the RTSP port."
     finally:
         sock.close()

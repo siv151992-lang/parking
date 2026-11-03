@@ -1,12 +1,13 @@
 import base64
 import time
+from urllib.parse import urlparse, urlunparse
 
 import cv2
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
-from ..anpr import onvif
+from ..anpr import onvif, rtsp_probe
 from ..anpr.manager import camera_manager
 from ..anpr.sources import OpenCVSource, SourceError, build_stream_url
 from ..anpr.tracker import DEFAULT_ZONE
@@ -139,18 +140,33 @@ def snapshot(cid: int, db: Session = Depends(get_db), _=Depends(require("cameras
 
 
 @router.post("/test-stream")
-def test_stream(body: TestStreamIn, _=Depends(require("cameras.manage"))):
+def test_stream(body: TestStreamIn, db: Session = Depends(get_db), _=Depends(require("cameras.manage"))):
     """Try to connect to an RTSP URL and return a snapshot (does not save anything)."""
-    src = OpenCVSource(build_stream_url(body.rtsp_url, body.username, body.password), read_timeout=8)
+    password = body.password
+    if not password and body.camera_id:
+        cam = db.get(Camera, body.camera_id)
+        password = cam.password if cam else ""
+    url = build_stream_url(body.rtsp_url, body.username, password)
+    found_url = None
+    if url.lower().startswith("rtsp://") and rtsp_probe.probe(url)[0] == "path":
+        # The login works but the path is wrong: look for the camera's real stream path.
+        found = rtsp_probe.find_stream_url(url)
+        if not found:
+            return {"ok": False, "error": "Login OK, but none of the usual stream paths work on this camera. "
+                                          "Enter the RTSP URL from the camera's manual (brand: Other)."}
+        url = found
+        p = urlparse(found)
+        found_url = urlunparse(p._replace(netloc=p.hostname + (f":{p.port}" if p.port else "")))
+    src = OpenCVSource(url, read_timeout=8)
     try:
         src.open()
         frame = src.read()
         h, w = frame.shape[:2]
         ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-        return {"ok": True, "width": w, "height": h, "fps": round(src.fps, 1),
+        return {"ok": True, "width": w, "height": h, "fps": round(src.fps, 1), "rtsp_url": found_url,
                 "snapshot": "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode() if ok else None}
     except SourceError as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "rtsp_url": found_url}
     finally:
         src.close()
 

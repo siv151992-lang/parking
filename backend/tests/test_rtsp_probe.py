@@ -6,9 +6,10 @@ import threading
 
 import pytest
 
-from app.anpr.rtsp_probe import diagnose
+from app.anpr.rtsp_probe import diagnose, find_stream_url
+from .conftest import login
 
-REALM, NONCE, USER, PASSWORD, PATH = "IP Camera", "abc123", "admin", "p@ss#1", "/Streaming/Channels/101"
+REALM, NONCE, USER, PASSWORD, PATH = "IP Camera", "abc123", "admin", "p@ss#1", "/live/main"
 
 
 def _md5(s):
@@ -80,7 +81,21 @@ def test_missing_credentials(camera_port):
 
 
 def test_wrong_path(camera_port):
-    assert "does not exist" in diagnose(url(camera_port, USER, PASSWORD, "/cam/realmonitor"))
+    assert "does not exist" in diagnose(url(camera_port, USER, PASSWORD, "/Streaming/Channels/101"))
+
+
+def test_finds_the_real_path(camera_port):
+    found = find_stream_url(url(camera_port, USER, PASSWORD, "/Streaming/Channels/101"))
+    assert found and found.endswith("/live/main")
+    assert find_stream_url(url(camera_port, USER, "nope")) is None
+
+
+def test_test_stream_reports_found_path(client, camera_port):
+    h = login(client)
+    r = client.post("/api/cameras/test-stream", headers=h, json={
+        "rtsp_url": f"rtsp://127.0.0.1:{camera_port}/Streaming/Channels/101", "username": USER, "password": PASSWORD})
+    # the fake camera sends no video, so the open fails, but the right path is reported without credentials
+    assert r.json()["rtsp_url"] == f"rtsp://127.0.0.1:{camera_port}/live/main"
 
 
 def test_closed_port():

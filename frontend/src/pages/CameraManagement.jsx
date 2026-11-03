@@ -125,7 +125,9 @@ export default function CameraManagement() {
   const testStream = async () => {
     setTest({ loading: true });
     try {
-      setTest(await post("/api/cameras/test-stream", { rtsp_url: url, username: form.username, password: form.password || "" }));
+      const r = await post("/api/cameras/test-stream", { rtsp_url: url, username: form.username, password: form.password || "", camera_id: form.id || null });
+      if (r.rtsp_url) setForm((f) => ({ ...f, brand: "other", rtsp_url: r.rtsp_url }));
+      setTest(r);
     } catch (e) {
       setTest({ ok: false, error: e.message });
     }
@@ -233,7 +235,7 @@ export default function CameraManagement() {
                 {test && !test.loading && (
                   <div className="sm:col-span-2 text-sm">
                     {test.ok ? (
-                      <div className="flex gap-3 items-start"><img src={test.snapshot} alt="Camera snapshot" className="w-48 rounded" /><p className="text-emerald-700">Connected · {test.width}×{test.height} · {test.fps} fps. Click Save camera.</p></div>
+                      <div className="flex gap-3 items-start"><img src={test.snapshot} alt="Camera snapshot" className="w-48 rounded" /><div className="text-emerald-700 space-y-1"><p>Connected · {test.width}×{test.height} · {test.fps} fps. Click Save camera.</p>{test.rtsp_url && <p className="text-xs">Found this camera's stream at <span className="font-mono break-all">{test.rtsp_url}</span>. It has been filled in for you.</p>}</div></div>
                     ) : (
                       <p className="text-red-600">Could not connect: {test.error}</p>
                     )}
