@@ -45,6 +45,11 @@ class CameraWorker(threading.Thread):
         self._cfg_loaded = 0.0
         self.tracker = VehicleTracker()
         self.tracker.prefix = f"C{camera_id}-"
+        self._viewer_until = 0.0     # live view frames are only drawn while someone watches
+        self._last_publish = 0.0
+        self._motion_prev: np.ndarray | None = None
+        self._motion_until = 0.0
+        self.yolo_runs = 0
 
     # ---------------------------------------------------------------- api
     def stop(self):
@@ -53,6 +58,10 @@ class CameraWorker(threading.Thread):
     def latest_jpeg(self) -> bytes | None:
         with self._jpeg_lock:
             return self._jpeg
+
+    def touch_viewer(self, seconds: float = 6.0):
+        """Called by the live view / snapshot endpoints: keep drawing frames for a while."""
+        self._viewer_until = max(self._viewer_until, time.monotonic() + seconds)
 
     def wait_frame(self, timeout: float = 2.0) -> bytes | None:
         with self._frame_cond:
@@ -69,6 +78,7 @@ class CameraWorker(threading.Thread):
             "last_error": self.last_error,
             "engine": self.engine_mode,
             "active_tracks": len(self.tracker.active_tracks()),
+            "yolo_runs": self.yolo_runs,
             "last_event": self.last_event,
         }
 
@@ -181,6 +191,23 @@ class CameraWorker(threading.Thread):
             sim_source.close()
         self._set_status(CameraStatus.OFFLINE, "Worker stopped")
 
+    def _motion(self, frame: np.ndarray, zone: dict) -> bool:
+        """Cheap frame difference inside the detection zone (on a 160 px wide grey copy)."""
+        h, w = frame.shape[:2]
+        pts = zone.get("polygon", DEFAULT_ZONE["polygon"])
+        x1, x2 = int(min(p[0] for p in pts) * w), int(max(p[0] for p in pts) * w)
+        y1, y2 = int(min(p[1] for p in pts) * h), int(max(p[1] for p in pts) * h)
+        roi = frame[max(0, y1):max(y1 + 2, y2), max(0, x1):max(x1 + 2, x2)]
+        small_w = 160
+        small = cv2.resize(roi, (small_w, max(2, int(roi.shape[0] * small_w / max(1, roi.shape[1])))),
+                           interpolation=cv2.INTER_AREA)
+        gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (5, 5), 0)
+        prev, self._motion_prev = self._motion_prev, gray
+        if prev is None or prev.shape != gray.shape:
+            return True
+        changed = cv2.countNonZero(cv2.threshold(cv2.absdiff(prev, gray), 18, 255, cv2.THRESH_BINARY)[1])
+        return changed >= settings.MOTION_MIN_AREA * gray.size
+
     def _stream_loop(self, source):
         n = 0
         t0 = time.monotonic()
@@ -192,7 +219,16 @@ class CameraWorker(threading.Thread):
         else:
             engine = ANPREngine.get()
             self.engine_mode = "yolo+paddleocr" if engine.available else f"unavailable: {engine.error}"
+        # Real cameras send 25-30 fps; analysing ~8 of them is plenty to track a vehicle at a gate.
+        interval = 0.0 if source.is_simulated else 1.0 / max(0.5, settings.ANALYSIS_FPS)
+        next_t = time.monotonic()
+        last_yolo = 0.0
         while not self._stop_evt.is_set():
+            if interval:
+                wait = next_t - time.monotonic()
+                if wait > 0 and self._stop_evt.wait(wait):
+                    break
+                next_t = max(next_t + interval, time.monotonic())
             cfg = self._load_config()
             if cfg is None or not cfg["is_enabled"]:
                 self._stop_evt.set()
@@ -200,23 +236,33 @@ class CameraWorker(threading.Thread):
             frame = source.read()
             n += 1
             self.frames += 1
-            if time.monotonic() - t0 >= 2:
-                self.fps = n / (time.monotonic() - t0)
-                n, t0 = 0, time.monotonic()
-            if time.monotonic() - last_beat > 15:
+            now = time.monotonic()
+            if now - t0 >= 2:
+                self.fps = n / (now - t0)
+                n, t0 = 0, now
+            if now - last_beat > 15:
                 self._heartbeat()
-                last_beat = time.monotonic()
+                last_beat = now
 
             dets = None
             if use_truth:
                 dets = source.detections()
             elif engine.available and self.frames % max(1, settings.PROCESS_EVERY_N_FRAMES) == 0:
-                zone_top = min(p[1] for p in cfg["zone"].get("polygon", DEFAULT_ZONE["polygon"]))
-                dets = engine.detect(frame, zone_top)
+                busy = bool(self.tracker.active_tracks())
+                if settings.MOTION_GATE and self._motion(frame, cfg["zone"]):
+                    self._motion_until = now + 2.0
+                # YOLO only while something moves, a vehicle is being tracked, or at least every 3 s
+                if not settings.MOTION_GATE or busy or now < self._motion_until or now - last_yolo > 3.0:
+                    zone_top = min(p[1] for p in cfg["zone"].get("polygon", DEFAULT_ZONE["polygon"]))
+                    dets = engine.detect(frame, zone_top)
+                    self.yolo_runs += 1
+                    last_yolo = now
             if dets is not None:
                 for tev in self.tracker.update(dets, frame):
                     self._handle_event(tev, cfg, source.is_simulated)
-            self._publish(frame, cfg, source.is_simulated)
+            if now < self._viewer_until and now - self._last_publish >= 1.0 / max(0.5, settings.STREAM_FPS):
+                self._last_publish = now
+                self._publish(frame, cfg, source.is_simulated)
 
     def _handle_event(self, tev, cfg, is_simulated):
         ev = DetectionEvent(
@@ -238,7 +284,9 @@ class CameraWorker(threading.Thread):
 
     # ------------------------------------------------------------- stream
     def _publish(self, frame: np.ndarray, cfg: dict, is_simulated: bool):
-        img = frame.copy()
+        fh, fw = frame.shape[:2]
+        scale = min(1.0, settings.STREAM_MAX_WIDTH / fw)
+        img = cv2.resize(frame, (int(fw * scale), int(fh * scale)), interpolation=cv2.INTER_AREA) if scale < 1 else frame.copy()
         h, w = img.shape[:2]
         zone = cfg["zone"]
         poly = np.array([[int(x * w), int(y * h)] for x, y in zone.get("polygon", DEFAULT_ZONE["polygon"])], np.int32)
@@ -246,7 +294,7 @@ class CameraWorker(threading.Thread):
         ly = int(float(zone.get("trigger_line", DEFAULT_ZONE["trigger_line"])) * h)
         cv2.line(img, (0, ly), (w, ly), (0, 0, 255) if cfg["direction"] == Direction.EXIT else (0, 200, 0), 2)
         for tr in self.tracker.active_tracks():
-            x1, y1, x2, y2 = map(int, tr.bbox)
+            x1, y1, x2, y2 = (int(v * scale) for v in tr.bbox)
             color = (0, 255, 0) if tr.emitted else (0, 200, 255) if tr.triggered else (255, 255, 0)
             cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
             label = tr.id

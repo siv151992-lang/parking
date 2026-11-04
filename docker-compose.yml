@@ -27,6 +27,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin@123}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000}
       YOLO_DEVICE: ${YOLO_DEVICE:-cpu}
+      ANALYSIS_FPS: ${ANALYSIS_FPS:-8}
     ports: ["8000:8000"]
     volumes:
       - media:/app/backend/media

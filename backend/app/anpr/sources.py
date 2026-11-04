@@ -60,6 +60,7 @@ class OpenCVSource:
         self._thread: threading.Thread | None = None
         self.is_file = os.path.isfile(url)
         self.fps = 0.0
+        self._want = threading.Event()  # set by read(): only then is a frame converted to BGR
 
     def open(self):
         self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
@@ -84,23 +85,37 @@ class OpenCVSource:
         self._thread.start()
 
     def _grab_loop(self):
+        """Keep up with the stream (every packet must be decoded for H.264), but only
+        convert a frame to an image when the worker asks for one: most frames are
+        skipped, which saves most of the CPU per camera."""
         delay = 1.0 / self.fps if self.is_file and self.fps > 0 else 0
         while not self._stop.is_set():
-            ok, frame = self.cap.read()
-            if not ok or frame is None:
+            if not self.cap.grab():
                 if self.is_file:
                     self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
                 time.sleep(0.05)
                 continue
-            with self._lock:
-                self._frame, self._frame_time = frame, time.monotonic()
-                self._seq += 1
+            now = time.monotonic()
+            if self._want.is_set():
+                ok, frame = self.cap.retrieve()
+                if ok and frame is not None:
+                    self._want.clear()
+                    with self._lock:
+                        self._frame, self._frame_time = frame, now
+                        self._seq += 1
+            else:
+                with self._lock:
+                    self._frame_time = now  # the stream is alive even if no image was needed
             if delay:
                 time.sleep(delay)
 
     def read(self) -> np.ndarray:
         deadline = time.monotonic() + self.read_timeout
+        with self._lock:
+            fresh = self._seq != self._last_read_seq
+        if not fresh:
+            self._want.set()
         while time.monotonic() < deadline:
             with self._lock:
                 if self._seq != self._last_read_seq and self._frame is not None:

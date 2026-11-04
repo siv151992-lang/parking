@@ -1,8 +1,8 @@
 # Deployment
 
-The backend is a **single process**: the REST API, WebSocket hub and the camera worker threads run together. Run **one** uvicorn worker per site. Scale ANPR throughput with a GPU (`YOLO_DEVICE=cuda:0`, `paddlepaddle-gpu`) or a higher `PROCESS_EVERY_N_FRAMES`, not with more web workers. In production, the built React app is served by the same process from `frontend/dist`.
+The backend is a **single process**: the REST API, WebSocket hub and the camera worker threads run together. Run **one** uvicorn worker per site. Scale ANPR throughput with a GPU (`YOLO_DEVICE=cuda:0`, `paddlepaddle-gpu`) or a lower `ANALYSIS_FPS`, not with more web workers. In production, the built React app is served by the same process from `frontend/dist`.
 
-Sizing guide (CPU-only, YOLOv8n, every 3rd frame): about 4 cameras per 8-core server. With an NVIDIA GPU: 12–20 cameras.
+Sizing guide (CPU-only, YOLOv8n): decoding a 1080p H.264 stream costs roughly 5–10% of one core per camera all the time; YOLO + OCR only run while something moves at that camera (motion gate). A 4–8 core PC handles 10–20 gate / row cameras at typical parking traffic. Live video is only drawn while someone watches it: the Live Cameras grid shows pictures refreshed once a second, and full video opens per camera.
 
 ## Option A: Docker (Linux or Windows with Docker Desktop)
 

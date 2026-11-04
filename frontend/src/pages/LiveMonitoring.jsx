@@ -1,10 +1,53 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Columns2, Columns3, Maximize2, RefreshCw, Square, Syringe, VideoOff } from "lucide-react";
-import { authUrl, get, post } from "../lib/api";
+import { api, authUrl, get, post } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useEvent, useLiveRefresh } from "../lib/realtime";
 import { fmtTime, sinceNow, VEHICLE_TYPES } from "../lib/format";
 import { Badge, Button, Card, Field, Input, Modal, PageHeader, Plate, Select, SimBadge, Spinner, StatusBadge, Thumb, useFetch, useToast } from "../components/ui";
+
+/** A still picture refreshed about once a second, only while it is on screen and the tab is visible.
+ * Short requests instead of one open video per tile: a browser only allows ~6 open connections per
+ * server, so a grid of live videos would block every other request of the app. */
+function LiveSnapshot({ cam, interval = 1000, onError }) {
+  const ref = useRef(null);
+  const [src, setSrc] = useState(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const io = new IntersectionObserver(([e]) => setVisible(e.isIntersecting));
+    if (ref.current) io.observe(ref.current);
+    return () => io.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!visible) return undefined;
+    let stop = false;
+    let timer;
+    let url = null;
+    const tick = async () => {
+      if (stop) return;
+      if (document.hidden) { timer = setTimeout(tick, interval); return; }
+      try {
+        const res = await api(`/api/cameras/${cam.id}/snapshot`, { raw: true });
+        const next = URL.createObjectURL(await res.blob());
+        if (stop) { URL.revokeObjectURL(next); return; }
+        setSrc(next);
+        if (url) URL.revokeObjectURL(url);
+        url = next;
+        timer = setTimeout(tick, interval);
+      } catch {
+        onError?.();
+        timer = setTimeout(tick, interval * 4);
+      }
+    };
+    tick();
+    return () => { stop = true; clearTimeout(timer); if (url) setTimeout(() => URL.revokeObjectURL(url), 2000); };
+  }, [visible, cam.id, interval, onError]);
+  return (
+    <div ref={ref} className="w-full h-full flex items-center justify-center">
+      {src ? <img src={src} alt={cam.name} className="w-full h-full object-contain" /> : <span className="text-xs text-slate-500">Loading…</span>}
+    </div>
+  );
+}
 
 function CameraTile({ cam, onExpand }) {
   const [key, setKey] = useState(0);
@@ -14,7 +57,9 @@ function CameraTile({ cam, onExpand }) {
     <div className="bg-navy-950 rounded-xl overflow-hidden shadow-sm ring-1 ring-navy-800 flex flex-col">
       <div className="relative aspect-video bg-black flex items-center justify-center">
         {cam.is_enabled && live && !err ? (
-          <img key={key} src={authUrl(`/api/cameras/${cam.id}/stream`)} alt={cam.name} className="w-full h-full object-contain" onError={() => setErr(true)} />
+          <button type="button" key={key} className="w-full h-full" onClick={() => onExpand(cam)} title="Open live video">
+            <LiveSnapshot cam={cam} />
+          </button>
         ) : (
           <div className="text-slate-500 flex flex-col items-center gap-2 text-sm">
             <VideoOff size={28} />

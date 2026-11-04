@@ -33,7 +33,11 @@ class Settings(BaseSettings):
 
     # Camera workers
     CAMERA_WORKERS_ENABLED: bool = True
-    PROCESS_EVERY_N_FRAMES: int = 3
+    ANALYSIS_FPS: float = 8.0            # frames per second each real camera is analysed (the rest are skipped)
+    PROCESS_EVERY_N_FRAMES: int = 1      # run YOLO on every Nth analysed frame while there is motion
+    MOTION_GATE: bool = True             # skip YOLO while nothing moves in the detection zone
+    MOTION_MIN_AREA: float = 0.004       # share of the zone that must change to count as motion
+    STREAM_FPS: float = 6.0              # live view frame rate (frames are only drawn while someone watches)
     RECONNECT_MIN_SECONDS: float = 2.0
     RECONNECT_MAX_SECONDS: float = 60.0
     STREAM_JPEG_QUALITY: int = 70

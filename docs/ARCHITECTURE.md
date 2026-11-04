@@ -35,7 +35,7 @@
 ## Processing pipeline (per camera)
 
 1. **Capture**: `OpenCVSource` opens the RTSP URL over TCP. A grabber thread keeps only the newest frame, so slow inference never makes the video fall behind. If no frame arrives for 10 s the stream is treated as lost.
-2. **Detect**: on every Nth frame (`PROCESS_EVERY_N_FRAMES`), YOLO detects car / motorcycle / bus / truck (mapped to CAR / TWO_WHEELER / COMMERCIAL).
+2. **Detect**: each camera is analysed `ANALYSIS_FPS` times per second (default 8; other frames are decoded but not converted). YOLO runs only while a cheap frame-difference check sees motion in the detection zone, while a vehicle is tracked, or at least every 3 s (`MOTION_GATE`). It detects car / motorcycle / bus / truck (mapped to CAR / TWO_WHEELER / COMMERCIAL).
 3. **Locate plate**: a dedicated plate YOLO model if one is configured. Otherwise OpenCV morphology (black-hat, Sobel, aspect-ratio filter), with PaddleOCR text detection on the lower half of the vehicle as the fallback.
 4. **OCR**: PaddleOCR on the CLAHE-enhanced crop. Two-row plates are merged top-to-bottom, then the text is normalised to `[A-Z0-9]`.
 5. **Track**: the IoU tracker gives each physical vehicle a track. OCR reads are collected on the track across frames.

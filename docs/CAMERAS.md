@@ -47,7 +47,7 @@ Rules that keep row counts correct:
 
 * Mount the camera 1.5–3 m high with less than 30° horizontal angle to the plate. Plate width in the image should be at least 130 px.
 * Shutter 1/1000 s or faster, and IR illumination at night. Avoid backlight from the lane exit.
-* 25 fps H.264 main stream at 1080p. Raise `PROCESS_EVERY_N_FRAMES` on weaker CPUs.
+* 25 fps H.264 main stream at 1080p. On a weak PC, lower `ANALYSIS_FPS` (default 8) in `.env`.
 * Use a dedicated licence-plate YOLO model for best accuracy: set `YOLO_PLATE_MODEL=/path/plate.pt` in `.env`. Without one, OpenCV morphology and PaddleOCR text detection locate the plate.
 * For country-specific validation, set the `plate_regex` setting. Example for India: `[A-Z]{2}[0-9]{1,2}[A-Z]{0,3}[0-9]{4}`.
 

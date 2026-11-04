@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import time
 from urllib.parse import urlparse, urlunparse
@@ -11,6 +12,7 @@ from ..anpr import onvif, rtsp_probe
 from ..anpr.manager import camera_manager
 from ..anpr.sources import OpenCVSource, SourceError, build_stream_url
 from ..anpr.tracker import DEFAULT_ZONE
+from ..config import settings
 from ..database import get_db
 from ..deps import client_ip, require
 from ..models import Camera, CameraStatus, Direction, ParkingRow
@@ -157,23 +159,28 @@ def restart_camera(cid: int, request: Request, db: Session = Depends(get_db), us
 def stream(cid: int, db: Session = Depends(get_db), _=Depends(require("cameras.view", allow_query_token=True))):
     """MJPEG live stream with detection overlay. Use as <img src=...?token=JWT>."""
     _get(db, cid)
+    db.close()  # give the DB connection back now: the stream can stay open for hours
     worker = camera_manager.get(cid)
     if worker is None:
         raise HTTPException(409, "Camera worker not running (camera disabled?)")
 
-    def gen():
+    async def gen():
+        # async: a viewer does not hold one of the server's worker threads
         last = None
         idle_since = time.monotonic()
+        period = 1.0 / max(0.5, settings.STREAM_FPS)
         while worker.is_alive():
-            frame = worker.wait_frame(timeout=2.0)
+            worker.touch_viewer()
+            frame = worker.latest_jpeg()
             if frame is None or frame is last:
                 if time.monotonic() - idle_since > 60:
                     break
+                await asyncio.sleep(period / 2)
                 continue
             idle_since = time.monotonic()
             last = frame
             yield b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(frame)).encode() + b"\r\n\r\n" + frame + b"\r\n"
-            time.sleep(0.08)  # cap ~12 fps per viewer
+            await asyncio.sleep(period)
 
     return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame",
                              headers={"Cache-Control": "no-cache, private", "X-Accel-Buffering": "no"})
@@ -183,7 +190,12 @@ def stream(cid: int, db: Session = Depends(get_db), _=Depends(require("cameras.v
 def snapshot(cid: int, db: Session = Depends(get_db), _=Depends(require("cameras.view", allow_query_token=True))):
     _get(db, cid)
     worker = camera_manager.get(cid)
-    frame = worker.latest_jpeg() if worker else None
+    if worker is None:
+        raise HTTPException(404, "No frame available yet")
+    idle = time.monotonic() > worker._viewer_until
+    worker.touch_viewer()
+    frame = worker.wait_frame(timeout=1.0) if idle else worker.latest_jpeg()  # first look: wait for a fresh frame
+    frame = frame or worker.latest_jpeg()
     if frame is None:
         raise HTTPException(404, "No frame available yet")
     return Response(frame, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
