@@ -48,6 +48,7 @@ class BulkIn(BaseModel):
     cameras: list[BulkCamera] = Field(max_length=MAX_LINES)
     default_username: str = ""
     default_password: str = ""
+    default_position: str = "Gate in"  # used for lines without a position that the name doesn't explain
     dry_run: bool = True
     check_connection: bool = True
 
@@ -65,7 +66,7 @@ def parse_position(text: str, rows: list[ParkingRow]) -> tuple[ParkingRow | None
             break
     if direction is None:
         raise ValueError("Position must end with 'in' or 'out', e.g. 'Gate in' or 'Row A out'")
-    if t in GATE_WORDS:
+    if t in GATE_WORDS or re.search(r"\bgate\b", t):
         return None, direction
     by_name = {r.name.strip().lower(): r for r in rows}
     row = by_name.get(t) or by_name.get(f"row {t}") or by_name.get(t.removeprefix("row ").strip())
@@ -113,7 +114,18 @@ def _validate(db: Session, body: BulkIn) -> list[dict]:
             r["warnings"].append("A camera with this name already exists")
         seen_names.add(r["name"].lower())
         try:
-            row, direction = parse_position(c.position, rows)
+            if c.position.strip():
+                row, direction = parse_position(c.position, rows)
+            else:  # optional column: work it out from the name, else use the default
+                try:
+                    row, direction = parse_position(c.name, rows)
+                    r["warnings"].append("Position taken from the name")
+                except ValueError:
+                    try:
+                        row, direction = parse_position(body.default_position, rows)
+                    except ValueError as e:
+                        raise ValueError(f"No position, and the default position is invalid: {e}")
+                    r["warnings"].append("No position given: using the default")
             r.update(row_id=row.id if row else None, row=row.name if row else None, direction=direction,
                      position=f"{row.name if row else 'Main gate'} · {'in' if direction == Direction.ENTRY else 'out'}")
             r["camera_code"] = _next_code(db, direction, row, reserved)

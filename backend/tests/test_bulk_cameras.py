@@ -21,6 +21,8 @@ def test_parse_position():
     assert parse_position("a out", rows) == (a, "EXIT")
     assert parse_position("row-a  exit", rows) == (a, "EXIT")
     assert parse_position("Basement entry", rows) == (b, "ENTRY")
+    assert parse_position("North gate in", rows) == (None, "ENTRY")
+    assert parse_position("Row A entrance", rows) == (a, "ENTRY")
     with pytest.raises(ValueError, match="Unknown row"):
         parse_position("Row Z in", rows)
     with pytest.raises(ValueError, match="must end with"):
@@ -93,3 +95,20 @@ def test_parse_excel_and_csv(client):
     r = client.post("/api/cameras/bulk/parse-file", headers=h, files={"file": ("c.csv", csv_bytes, "text/csv")})
     assert r.json()["rows"][1] == ["Row A in", "Row A in", "10.0.0.21"]
     assert client.post("/api/cameras/bulk/parse-file", headers=h, files={"file": ("c.pdf", b"x", "application/pdf")}).status_code == 400
+
+
+def test_position_is_optional(client, db):
+    h = login(client)
+    _rows(client, h)
+    r = client.post("/api/cameras/bulk", headers=h, json={"dry_run": True, "check_connection": False,
+                                                          "default_position": "Gate out", "cameras": [
+        {"name": "Row A in", "ip_address": "10.0.1.1"},          # from the name
+        {"name": "North gate out", "ip_address": "10.0.1.2"},    # from the name
+        {"name": "Camera 7", "ip_address": "10.0.1.3"},          # default
+    ]}).json()
+    assert [l["position"] for l in r["lines"]] == ["Row A · in", "Main gate · out", "Main gate · out"]
+    assert r["lines"][0]["warnings"] == ["Position taken from the name"]
+    assert r["lines"][2]["warnings"] == ["No position given: using the default"]
+    r = client.post("/api/cameras/bulk", headers=h, json={"dry_run": True, "check_connection": False,
+                                                          "default_position": "Row Q in", "cameras": [{"name": "Cam", "ip_address": "10.0.1.9"}]}).json()
+    assert "default position is invalid" in r["lines"][0]["errors"][0]

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { CheckCircle2, Download, FileUp } from "lucide-react";
 import { post, upload } from "../lib/api";
-import { Badge, Button, Field, Input, Modal, Table, useToast } from "../components/ui";
+import { Badge, Button, Field, Input, Modal, Select, Table, useToast } from "../components/ui";
 
 // Column names accepted in a header row (any case); without a header the order is fixed.
 const FIELDS = [
@@ -14,13 +14,15 @@ const FIELDS = [
   ["location", ["location", "place", "area"]],
 ];
 const ORDER = FIELDS.map(([k]) => k);
+const ORDER_NO_POSITION = ORDER.filter((k) => k !== "position");
+const looksLikeAddress = (v) => /^(rtsp:\/\/|\d{1,3}(\.\d{1,3}){3})/i.test(String(v || "").trim());
 
 const TEMPLATE = [
-  ["Name", "Position", "IP address", "Username", "Password", "RTSP URL (optional)", "Location (optional)"],
+  ["Name", "Position (optional)", "IP address", "Username", "Password", "RTSP URL (optional)", "Location (optional)"],
   ["Main gate in", "Gate in", "192.168.1.64", "admin", "", "", "Gate 1"],
   ["Main gate out", "Gate out", "192.168.1.65", "admin", "", "", "Gate 1"],
-  ["Row A in", "Row A in", "192.168.1.71", "admin", "", "", ""],
-  ["Row A out", "Row A out", "192.168.1.72", "admin", "", "", ""],
+  ["Row A in", "", "192.168.1.71", "admin", "", "", ""],
+  ["Row A out", "", "192.168.1.72", "admin", "", "", ""],
 ];
 
 function splitLine(line, delim) {
@@ -56,8 +58,9 @@ export function rowsToCameras(rows) {
   const header = rows[0].map(norm);
   const map = header.map((h) => FIELDS.find(([, names]) => names.includes(h))?.[0] || null);
   const hasHeader = map.filter(Boolean).length >= 2;
-  const cols = hasHeader ? map : ORDER;
   return (hasHeader ? rows.slice(1) : rows).map((r) => {
+    // without a header: "Name, IP, ..." (no position column) or "Name, Position, IP, ..."
+    const cols = hasHeader ? map : looksLikeAddress(r[1]) ? ORDER_NO_POSITION : ORDER;
     const cam = {};
     cols.forEach((k, i) => { if (k) cam[k] = String(r[i] ?? "").trim(); });
     return cam;
@@ -86,7 +89,12 @@ export default function BulkCameras({ open, onClose, onDone, rows }) {
   const toast = useToast();
   const fileRef = useRef(null);
   const [text, setText] = useState("");
-  const [defaults, setDefaults] = useState({ username: "admin", password: "" });
+  const [defaults, setDefaults] = useState({ username: "admin", password: "", position: "Gate in" });
+  const positionOptions = [
+    { value: "Gate in", label: "Main gate · in" },
+    { value: "Gate out", label: "Main gate · out" },
+    ...rows.flatMap((r) => [{ value: `${r.name} in`, label: `${r.name} · in` }, { value: `${r.name} out`, label: `${r.name} · out` }]),
+  ];
   const [checkConn, setCheckConn] = useState(true);
   const [review, setReview] = useState(null); // { cameras, result }
   const [busy, setBusy] = useState(false);
@@ -113,7 +121,7 @@ export default function BulkCameras({ open, onClose, onDone, rows }) {
     setBusy(true);
     try {
       const result = await post("/api/cameras/bulk", {
-        cameras, default_username: defaults.username, default_password: defaults.password, dry_run: true, check_connection: checkConn,
+        cameras, default_username: defaults.username, default_password: defaults.password, default_position: defaults.position, dry_run: true, check_connection: checkConn,
       });
       setReview({ cameras, result });
     } catch (e) {
@@ -129,7 +137,7 @@ export default function BulkCameras({ open, onClose, onDone, rows }) {
       // keep the video addresses the check found
       const list = review.cameras.map((c, i) => ({ ...c, rtsp_url: review.result.lines[i]?.rtsp_url || c.rtsp_url || "" }));
       const r = await post("/api/cameras/bulk", {
-        cameras: list, default_username: defaults.username, default_password: defaults.password, dry_run: false, check_connection: false,
+        cameras: list, default_username: defaults.username, default_password: defaults.password, default_position: defaults.position, dry_run: false, check_connection: false,
       });
       toast(`Added ${r.created} camera${r.created === 1 ? "" : "s"}${r.skipped ? ` · ${r.skipped} skipped` : ""}`, "success");
       reset();
@@ -161,7 +169,7 @@ export default function BulkCameras({ open, onClose, onDone, rows }) {
       {!review ? (
         <div className="space-y-4">
           <p className="text-sm text-slate-600">
-            One camera per line: <b>Name, Position, IP address, Username, Password</b>. Copy the rows from Excel and paste them here, or upload the Excel / CSV file.
+            One camera per line: <b>Name, Position (optional), IP address, Username, Password</b>. Copy the rows from Excel and paste them here, or upload the Excel / CSV file.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" icon={FileUp} onClick={() => fileRef.current?.click()}>Upload Excel / CSV</Button>
@@ -173,14 +181,16 @@ export default function BulkCameras({ open, onClose, onDone, rows }) {
             placeholder={"Main gate in\tGate in\t192.168.1.64\nMain gate out\tGate out\t192.168.1.65\nRow A in\tRow A in\t192.168.1.71\nRow A out\tRow A out\t192.168.1.72"}
             className="w-full rounded-lg ring-1 ring-slate-300 focus:ring-2 focus:ring-navy-600 outline-none p-3 font-mono text-xs" />
           <div className="text-xs text-slate-500 space-y-1">
-            <p><b>Position</b>: <code>Gate in</code>, <code>Gate out</code>, or a row and in/out, for example <code>Row A in</code>, <code>Row A out</code>.
+            <p><b>Position</b> (optional): <code>Gate in</code>, <code>Gate out</code>, or a row and in/out, for example <code>Row A in</code>.
+              If it is empty, it is read from the name (a camera named "Row A in" goes to Row A, in), otherwise the default below is used.
               {rows.length ? ` Your rows: ${rows.map((r) => r.name).join(", ")}.` : " Add rows under Parking Spaces first to use row positions."}</p>
             <p>Leave username / password empty on a line to use the ones below. The video address is found automatically.</p>
           </div>
-          <div className="grid sm:grid-cols-3 gap-3 items-end">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
             <Field label="Username for all cameras"><Input value={defaults.username} onChange={(e) => setDefaults({ ...defaults, username: e.target.value })} autoComplete="off" /></Field>
             <Field label="Password for all cameras"><Input type="password" value={defaults.password} onChange={(e) => setDefaults({ ...defaults, password: e.target.value })} autoComplete="new-password" /></Field>
-            <label className="flex items-center gap-2 text-sm pb-2"><input type="checkbox" checked={checkConn} onChange={(e) => setCheckConn(e.target.checked)} /> Check each camera answers</label>
+            <Field label="Default position"><Select value={defaults.position} onChange={(e) => setDefaults({ ...defaults, position: e.target.value })} options={positionOptions} /></Field>
+            <label className="flex items-center gap-2 text-sm pb-2 sm:col-span-2 lg:col-span-4"><input type="checkbox" checked={checkConn} onChange={(e) => setCheckConn(e.target.checked)} /> Check each camera answers</label>
           </div>
         </div>
       ) : (
@@ -208,7 +218,7 @@ export default function BulkCameras({ open, onClose, onDone, rows }) {
                 ) : (
                   <div className="w-72 whitespace-normal">
                     <p className="text-xs font-medium text-emerald-700">Ready</p>
-                    {l.warnings.map((w) => <p key={w} className="text-[11px] text-amber-700">{w}</p>)}
+                    {l.warnings.filter((w) => w !== l.message).map((w) => <p key={w} className="text-[11px] text-amber-700">{w}</p>)}
                   </div>
                 ) },
               ]}
