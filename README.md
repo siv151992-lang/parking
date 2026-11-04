@@ -35,6 +35,7 @@ On macOS / Linux, run `./start.sh` instead.
 2. **Cameras → Add camera**: name, *Camera position*, IP address, username and password. The video address is found automatically.
    * *Main gate · vehicles coming in / going out*: counts the whole car park.
    * *Row A · vehicles driving into / leaving the row*: counts the free spaces of Row A.
+   * Many cameras at once: **Cameras → Add many**. Paste rows from Excel (Name, Position, IP address, Username, Password) or upload an .xlsx / .csv file (*Download template* gives the format). Every line is checked, including whether the camera answers, before anything is saved.
 3. The **Dashboard** shows the free spaces, the vehicles inside, and the free spaces of every row, live.
 
 If a row camera was offline, correct the row's count under **Parking Spaces → Rows** (the sliders button).

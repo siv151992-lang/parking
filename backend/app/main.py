@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .anpr.manager import camera_manager
-from .api import admin, alerts, auth, cameras, dashboard, detections, occupancy, reports, rows, transactions, users, vehicles
+from .api import admin, alerts, auth, cameras, cameras_bulk, dashboard, detections, occupancy, reports, rows, transactions, users, vehicles
 from .config import BASE_DIR, settings
 from .database import SessionLocal, engine
 from .models import Alert, AlertType, DetectionStatus, ParkingSession, Role, SessionStatus, Severity, User, VehicleDetection
@@ -124,7 +124,7 @@ app = FastAPI(
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins_list, allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
 
-for r in (auth, users, cameras, dashboard, transactions, vehicles, detections, occupancy, rows, reports, alerts, admin):
+for r in (auth, users, cameras, cameras_bulk, dashboard, transactions, vehicles, detections, occupancy, rows, reports, alerts, admin):
     app.include_router(r.router)
 
 

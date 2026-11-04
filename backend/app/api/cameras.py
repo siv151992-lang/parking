@@ -50,14 +50,14 @@ def _row(db: Session, row_id: int | None) -> ParkingRow | None:
     return row
 
 
-def _next_code(db: Session, direction: str, row: ParkingRow | None) -> str:
+def _next_code(db: Session, direction: str, row: ParkingRow | None, reserved: set[str] | None = None) -> str:
     tag = "EN" if direction == Direction.ENTRY else "EX"
     if row is not None:
         slug = "".join(ch for ch in row.name.upper() if ch.isalnum())[-6:] or str(row.id)
         prefix = f"CAM-{slug}-{tag}-"
     else:
         prefix = f"CAM-{tag}-"
-    used = {c for (c,) in db.query(Camera.camera_code).filter(Camera.camera_code.like(prefix + "%")).all()}
+    used = {c for (c,) in db.query(Camera.camera_code).filter(Camera.camera_code.like(prefix + "%")).all()} | (reserved or set())
     n = 1
     while f"{prefix}{n:02d}" in used:
         n += 1

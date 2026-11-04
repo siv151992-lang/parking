@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ChevronDown, Pencil, Plus, Power, Radar, RotateCw, Trash2, Wifi } from "lucide-react";
+import { ChevronDown, ListPlus, Pencil, Plus, Power, Radar, RotateCw, Trash2, Wifi } from "lucide-react";
+import BulkCameras from "./BulkCameras";
 import { del, get, post, put } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { useLiveRefresh } from "../lib/realtime";
@@ -91,6 +92,7 @@ export default function CameraManagement() {
   const [test, setTest] = useState(null);
   const [discover, setDiscover] = useState(null);
   const [advanced, setAdvanced] = useState(false);
+  const [bulk, setBulk] = useState(false);
   useLiveRefresh(["camera_status", "detection"], cams.reload, 1500);
 
   if (!cams.data) return <Spinner />;
@@ -183,8 +185,10 @@ export default function CameraManagement() {
     <div className="space-y-5">
       <PageHeader title="Cameras" subtitle="Main gate cameras count the whole car park; row cameras count the free spaces of one row">
         {manage && <Button variant="secondary" icon={Radar} onClick={runDiscover}>Discover ONVIF</Button>}
+        {manage && <Button variant="secondary" icon={ListPlus} onClick={() => setBulk(true)}>Add many</Button>}
         {manage && <Button icon={Plus} onClick={() => openForm({})}>Add camera</Button>}
       </PageHeader>
+      <BulkCameras open={bulk} rows={rowList} onClose={() => setBulk(false)} onDone={() => { setBulk(false); cams.reload(); rows.reload(); }} />
 
       <Card bodyClass="p-0">
         <Table
