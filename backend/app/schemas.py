@@ -20,8 +20,18 @@ class ChangePasswordIn(BaseModel):
 
 
 class UserCreate(BaseModel):
-    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    username: str = Field(min_length=3, max_length=64)  # anything except spaces, e.g. an email address
     email: EmailStr
+
+    @field_validator("username")
+    @classmethod
+    def _no_spaces(cls, v: str) -> str:
+        v = v.strip()
+        if any(ch.isspace() for ch in v):
+            raise ValueError("Username cannot contain spaces")
+        if len(v) < 3:
+            raise ValueError("Username must be at least 3 characters")
+        return v
     full_name: str = ""
     password: str
     role: RoleT = "REPORT_VIEWER"

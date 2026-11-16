@@ -130,3 +130,13 @@ def test_websocket_rejects_bad_token(client):
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/ws?token=bad") as ws:
             ws.receive_json()
+
+
+def test_username_allows_anything_but_spaces(client):
+    h = login(client)
+    body = {"email": "deepak@example.com", "password": "Str0ng!Passw0rd", "role": "REPORT_VIEWER"}
+    r = client.post("/api/users", json={**body, "username": "deepak.k@zohocorphelpdesk.com"}, headers=h)
+    assert r.status_code in (200, 201), r.text
+    r = client.post("/api/users", json={**body, "email": "d2@example.com", "username": "deepak k"}, headers=h)
+    assert r.status_code == 422 and "cannot contain spaces" in r.text
+    assert client.post("/api/auth/login", json={"username": "deepak.k@zohocorphelpdesk.com", "password": "Str0ng!Passw0rd"}).status_code == 200
