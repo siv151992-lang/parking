@@ -15,7 +15,8 @@ export default function Users() {
   const save = async () => {
     try {
       if (form.id) {
-        const body = { email: form.email, full_name: form.full_name, role: form.role, is_active: form.is_active };
+        const body = { email: form.email, full_name: form.full_name };
+        if (!form.is_owner && form.id !== me.id) Object.assign(body, { role: form.role, is_active: form.is_active });
         if (form.password) body.password = form.password;
         await put(`/api/users/${form.id}`, body);
       } else await post("/api/users", form);
@@ -38,6 +39,13 @@ export default function Users() {
 
   if (!users.data) return <Spinner />;
   const perms = roles.data?.permissions || {};
+  // The first user is the owner: always Super Admin. Only the owner manages Super Admins.
+  const iAmOwner = !!me.is_owner;
+  const canEdit = (u) => (u.is_owner || u.role === "SUPER_ADMIN" ? iAmOwner || u.id === me.id : true);
+  const canDelete = (u) => !u.is_owner && u.id !== me.id && (u.role !== "SUPER_ADMIN" || iAmOwner);
+  const roleOptions = Object.entries(ROLES)
+    .filter(([value]) => iAmOwner || value !== "SUPER_ADMIN")
+    .map(([value, label]) => ({ value, label }));
   return (
     <div className="space-y-5">
       <PageHeader title="User Management" subtitle="Role-based access control. Passwords are stored as bcrypt hashes.">
@@ -45,14 +53,14 @@ export default function Users() {
       </PageHeader>
       <Card bodyClass="p-0">
         <Table rows={users.data} columns={[
-          { key: "username", label: "User", render: (u) => <div><p className="font-medium text-slate-900">{u.full_name || u.username}</p><p className="text-xs text-slate-500">@{u.username} · {u.email}</p></div> },
+          { key: "username", label: "User", render: (u) => <div><p className="font-medium text-slate-900 flex items-center gap-1.5">{u.full_name || u.username}{u.is_owner && <Badge color="violet" title="First account: always Super Admin, cannot be changed by others">Owner</Badge>}</p><p className="text-xs text-slate-500">@{u.username} · {u.email}</p></div> },
           { key: "role", label: "Role", render: (u) => <Badge color={u.role === "SUPER_ADMIN" ? "violet" : u.role === "PARKING_MANAGER" ? "blue" : u.role === "SECURITY_OPERATOR" ? "green" : "slate"}>{ROLES[u.role]}</Badge> },
           { key: "is_active", label: "Status", render: (u) => <Badge color={u.is_active ? "green" : "red"}>{u.is_active ? "Active" : "Disabled"}</Badge> },
           { key: "last_login_at", label: "Last login", render: (u) => fmtDateTime(u.last_login_at) },
           { key: "a", label: "", render: (u) => (
             <div className="flex gap-1 justify-end">
-              <Button size="sm" variant="ghost" icon={Pencil} onClick={() => setForm({ ...u, password: "" })} />
-              {u.id !== me.id && <Button size="sm" variant="ghost" icon={Trash2} onClick={() => remove(u)} />}
+              {canEdit(u) && <Button size="sm" variant="ghost" icon={Pencil} title="Edit" onClick={() => setForm({ ...u, password: "" })} />}
+              {canDelete(u) && <Button size="sm" variant="ghost" icon={Trash2} title="Delete" onClick={() => remove(u)} />}
             </div>
           ) },
         ]} />
@@ -78,11 +86,19 @@ export default function Users() {
             {!form.id && <Field label="Username"><Input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} autoComplete="off" /></Field>}
             <Field label="Full name"><Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></Field>
             <Field label="Email"><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
-            <Field label="Role"><Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} options={Object.entries(ROLES).map(([value, label]) => ({ value, label }))} /></Field>
+            {form.is_owner ? (
+              <p className="text-sm bg-violet-50 text-violet-800 rounded-lg p-3">This is the owner account: it is always an active Super Admin and only its owner can change its details.</p>
+            ) : form.id === me.id && !iAmOwner ? (
+              <p className="text-sm text-slate-500">You cannot change your own role.</p>
+            ) : (
+              <Field label="Role" hint={iAmOwner ? undefined : "Only the owner account can grant Super Admin rights"}>
+                <Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} options={roleOptions} />
+              </Field>
+            )}
             <Field label={form.id ? "New password (optional)" : "Password"} hint="Min. 8 characters with upper-case, lower-case and a digit">
               <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} autoComplete="new-password" />
             </Field>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} /> Active</label>
+            {!form.is_owner && form.id !== me.id && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} /> Active</label>}
           </div>
         )}
       </Modal>

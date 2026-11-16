@@ -47,6 +47,11 @@ def bootstrap():
             db.add(User(username=settings.ADMIN_USERNAME, email=settings.ADMIN_EMAIL, full_name="Super Administrator",
                         role=Role.SUPER_ADMIN, hashed_password=hash_password(settings.ADMIN_PASSWORD)))
             log.warning("Created initial super admin '%s' - change the password after first login!", settings.ADMIN_USERNAME)
+        else:
+            owner = db.query(User).order_by(User.id).first()
+            if owner.role != Role.SUPER_ADMIN or not owner.is_active:
+                owner.role, owner.is_active = Role.SUPER_ADMIN, True
+                log.warning("Restored owner account '%s' to active Super Admin", owner.username)
         ensure_capacity_rows(db)
         db.commit()
     finally:

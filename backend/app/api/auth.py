@@ -9,6 +9,7 @@ from ..models import User
 from ..schemas import ChangePasswordIn, LoginIn
 from ..security import create_access_token, hash_password, validate_password_strength, verify_password
 from ..serializers import user_out
+from .users import owner_id
 from ..services.audit import audit
 from ..services.timeutil import ensure_aware, utcnow
 
@@ -40,12 +41,12 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     user.last_login_at = utcnow()
     audit(db, user, "LOGIN", "user", user.id, {}, ip)
     db.commit()
-    return {"access_token": create_access_token(user.id, user.username, user.role), "token_type": "bearer", "user": user_out(user)}
+    return {"access_token": create_access_token(user.id, user.username, user.role), "token_type": "bearer", "user": {**user_out(user), "is_owner": user.id == owner_id(db)}}
 
 
 @router.get("/me")
-def me(user: User = Depends(get_current_user)):
-    return user_out(user)
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return {**user_out(user), "is_owner": user.id == owner_id(db)}
 
 
 @router.post("/logout")
