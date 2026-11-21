@@ -1,6 +1,6 @@
 # Testing
 
-## Automated tests (45 tests)
+## Automated tests (80 tests)
 
 ```bash
 cd backend
@@ -15,6 +15,8 @@ The PostgreSQL run is recommended before every deployment, because it exercises 
 | `tests/test_counting.py` | Entry / exit, cooldown on one camera and across two entry cameras, duplicate entry, duplicate exit, never-negative count, fuzzy OCR matching (and rejection when ambiguous), unreadable plates, low confidence, unread-session matching, categories / reserved, blacklist alerts, capacity alerts firing once, manual entry / exit, cancel entry / exit, resolve unmatched exit, detection review, reconciliation after 300 mixed random events |
 | `tests/test_tracker.py` | One event per vehicle crossing the line, one event for a vehicle waiting 200 frames at a barrier, no event outside the zone, two vehicles → two events, plate voting (whole string and per character), plate utilities |
 | `tests/test_api.py` | Login, lockout, auth required, RBAC per role, camera CRUD + inject, manual flow + history, capacity, all 10 reports × CSV / XLSX / PDF, settings validation, audit log, user management, WebSocket events, WebSocket auth |
+
+Frontend: `cd frontend && npm run lint && npm run build`. Browser tests (Playwright): see `e2e/README.md`.
 
 ## Manual end-to-end test with simulated cameras
 

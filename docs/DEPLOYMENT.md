@@ -62,8 +62,10 @@ Any VM works (AWS EC2, Azure VM, GCP, DigitalOcean). Use a managed PostgreSQL by
 
 ## Production checklist
 
-- [ ] `SECRET_KEY` is a long random value; `ADMIN_PASSWORD` is changed after the first login
-- [ ] HTTPS enabled (WebSocket becomes `wss://` automatically)
+- [ ] `SECRET_KEY` is set to at least 32 random characters (without it, a key is generated and kept in `backend/.secret_key`; back that file up, or every session ends when it is lost)
+- [ ] The `admin` password was changed at the first login (the app forces this while the default `Admin@123` is in use)
+- [ ] HTTPS enabled (WebSocket becomes `wss://` automatically). Behind nginx, uvicorn runs with `--proxy-headers` so audit logs and the login limit see the real client address
+- [ ] Security headers are sent by the app itself (Content-Security-Policy, X-Frame-Options, nosniff, Referrer-Policy); a reverse proxy may add `Strict-Transport-Security`
 - [ ] `CORS_ORIGINS` is limited to your domain
 - [ ] PostgreSQL backups, e.g. `pg_dump -Fc smart_parking > backup_$(date +%F).dump` daily
 - [ ] `backend/media` (captured images) is on a disk with enough space; `detection_retention_days` is set

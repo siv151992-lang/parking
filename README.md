@@ -18,7 +18,7 @@ A **camera simulation mode** lets you run and test everything without camera har
 
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and [Git](https://git-scm.com/download/win).
 2. Download the project: `git clone https://github.com/siv151992-lang/parking.git` (into your user folder, not `C:\Windows\System32`).
-3. Double-click **`start.bat`**. The first start builds everything (10–20 minutes). The browser then opens <http://localhost:8000>; log in as `admin` / `Admin@123`.
+3. Double-click **`start.bat`**. The first start builds everything (10–20 minutes). The browser then opens <http://localhost:8000>; log in as `admin` / `Admin@123`. You are then asked to choose your own password: the app cannot be used with the default one.
 
 | File | What it does |
 |---|---|
@@ -124,10 +124,20 @@ For production, run `npm run build`; the backend then serves the UI itself at <h
 
 | User | Password | Role |
 |---|---|---|
-| `admin` | `Admin@123` | Super Admin (created on first start; change the password!) |
+| `admin` | `Admin@123` | Super Admin, the protected owner account (created on first start; a new password must be set at the first login) |
 | `manager` | `Manager@123` | Parking Manager (seed) |
 | `operator` | `Operator@123` | Security Operator (seed) |
 | `viewer` | `Viewer@123` | Report Viewer (seed) |
+
+## Development checks
+
+```bash
+cd backend && pytest -q                 # 80 tests (SQLite); TEST_DATABASE_URL=... for PostgreSQL
+cd frontend && npm run lint && npm run build
+pip-audit -r backend/requirements.txt && (cd frontend && npm audit)   # known vulnerabilities
+```
+
+Browser tests (every page at three screen sizes, 21 workflows): see [e2e/README.md](e2e/README.md).
 
 ## How counting works
 
