@@ -22,6 +22,7 @@ numpy==2.2.1
 
 # Reports
 openpyxl==3.1.5
+defusedxml==0.7.1     # openpyxl uses it automatically to block XML attacks in uploaded .xlsx files
 reportlab==4.5.1
 
 # Testing

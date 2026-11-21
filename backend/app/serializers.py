@@ -1,4 +1,5 @@
 """Model -> JSON dict serializers shared by REST and WebSocket payloads."""
+from .anpr.sources import split_credentials
 from .models import (
     Camera,
     EntryTransaction,
@@ -37,7 +38,7 @@ def camera_out(c: Camera, runtime: dict | None = None) -> dict:
         "ip_address": c.ip_address,
         "port": c.port,
         "onvif_port": c.onvif_port,
-        "rtsp_url": c.rtsp_url,
+        "rtsp_url": split_credentials(c.rtsp_url)[0],  # never return a password embedded in the URL
         "username": c.username,
         "has_password": bool(c.password),
         "location": c.location,

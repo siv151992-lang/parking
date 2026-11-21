@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..anpr import onvif, rtsp_probe
 from ..anpr.manager import camera_manager
-from ..anpr.sources import OpenCVSource, SourceError, build_stream_url
+from ..anpr.sources import OpenCVSource, SourceError, build_stream_url, split_credentials
 from ..anpr.tracker import DEFAULT_ZONE
 from ..config import settings
 from ..database import get_db
@@ -89,6 +89,8 @@ def create_camera(body: CameraCreate, request: Request, db: Session = Depends(ge
         raise HTTPException(409, "Camera ID already exists")
     if not body.is_simulated and not body.rtsp_url:
         raise HTTPException(400, "RTSP URL is required for real cameras")
+    body.rtsp_url, url_user, url_pw = split_credentials(body.rtsp_url)
+    body.username, body.password = body.username or url_user, body.password or url_pw
     if not body.is_simulated:
         body.rtsp_url = _working_url(body.rtsp_url, body.username, body.password or "")
     data = body.model_dump()
@@ -118,6 +120,12 @@ def update_camera(cid: int, body: CameraUpdate, request: Request, db: Session = 
         changes.pop("camera_code")
     if "row_id" in changes:
         _row(db, changes["row_id"])
+    if changes.get("rtsp_url"):
+        changes["rtsp_url"], url_user, url_pw = split_credentials(changes["rtsp_url"])
+        if url_user:
+            changes["username"] = url_user
+        if url_pw:
+            changes["password"] = url_pw
     for k, v in changes.items():
         setattr(cam, k, v)
     if not cam.is_simulated and set(changes) & {"rtsp_url", "username", "password"}:

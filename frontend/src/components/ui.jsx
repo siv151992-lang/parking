@@ -94,7 +94,7 @@ export function Plate({ value, size = "md" }) {
   return <span className={`font-mono font-bold tracking-wider bg-amber-50 border border-slate-800/70 rounded text-slate-900 whitespace-nowrap ${s}`}>{value}</span>;
 }
 
-export function Button({ variant = "primary", size = "md", icon: Icon, loading, children, className = "", ...props }) {
+export function Button({ variant = "primary", size = "md", icon: Icon, loading, children, className = "", type = "button", disabled, ...props }) {
   const v = {
     primary: "bg-navy-900 text-white hover:bg-navy-800 focus-visible:outline-navy-700",
     secondary: "bg-white text-slate-700 ring-1 ring-inset ring-slate-300 hover:bg-slate-50",
@@ -106,8 +106,10 @@ export function Button({ variant = "primary", size = "md", icon: Icon, loading, 
   return (
     <button
       className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${v} ${s} ${className}`}
-      disabled={loading || props.disabled}
       {...props}
+      type={type}
+      disabled={loading || disabled}
+      aria-busy={loading || undefined}
     >
       {loading ? <Loader2 size={14} className="animate-spin" /> : Icon && <Icon size={size === "sm" ? 14 : 16} />}
       {children}

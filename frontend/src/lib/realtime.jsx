@@ -18,9 +18,11 @@ export function RealtimeProvider({ children, enabled }) {
 
     const connect = () => {
       const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${proto}://${window.location.host}/ws?token=${encodeURIComponent(getToken() || "")}`);
+      // the token goes in the first message, not the URL (URLs end up in server and proxy logs)
+      const ws = new WebSocket(`${proto}://${window.location.host}/ws`);
       wsRef.current = ws;
       ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "auth", token: getToken() || "" }));
         setConnected(true);
         retry = 1000;
         pingTimer = setInterval(() => ws.readyState === 1 && ws.send("ping"), 25000);

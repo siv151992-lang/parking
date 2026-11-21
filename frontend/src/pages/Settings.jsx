@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Save } from "lucide-react";
-import { get, post, put } from "../lib/api";
+import { get, put } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import PasswordForm from "../components/PasswordForm";
 import { fmtDateTime } from "../lib/format";
 import { Button, Card, Field, Input, PageHeader, Pagination, Spinner, Table, useFetch, useToast } from "../components/ui";
 
@@ -52,7 +53,6 @@ export default function Settings() {
   // saved values with the user's unsaved edits on top
   const vals = { ...Object.fromEntries((st.data || []).map((s) => [s.key, s.value])), ...edits };
   const setVals = (next) => setEdits(next);
-  const [pw, setPw] = useState({ current_password: "", new_password: "" });
 
   const save = async () => {
     const changes = {};
@@ -68,15 +68,6 @@ export default function Settings() {
       toast("Settings saved", "success");
       setEdits({});
       st.reload();
-    } catch (e) {
-      toast(e.message, "error");
-    }
-  };
-  const changePw = async () => {
-    try {
-      await post("/api/auth/change-password", pw);
-      toast("Password changed", "success");
-      setPw({ current_password: "", new_password: "" });
     } catch (e) {
       toast(e.message, "error");
     }
@@ -104,11 +95,7 @@ export default function Settings() {
         )}
       </Card>
       <Card title="Change my password">
-        <div className="grid sm:grid-cols-3 gap-3 items-end">
-          <Field label="Current password"><Input type="password" value={pw.current_password} onChange={(e) => setPw({ ...pw, current_password: e.target.value })} /></Field>
-          <Field label="New password"><Input type="password" value={pw.new_password} onChange={(e) => setPw({ ...pw, new_password: e.target.value })} /></Field>
-          <Button onClick={changePw} disabled={!pw.current_password || !pw.new_password}>Update password</Button>
-        </div>
+        <div className="max-w-sm"><PasswordForm /></div>
       </Card>
       {can("audit.view") && <AuditLog />}
     </div>

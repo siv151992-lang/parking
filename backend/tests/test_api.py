@@ -13,7 +13,7 @@ def test_login_and_me(client):
 def test_bad_login_and_lockout(client):
     for _ in range(5):
         assert client.post("/api/auth/login", json={"username": "admin", "password": "nope"}).status_code == 401
-    assert client.post("/api/auth/login", json={"username": "admin", "password": "Admin@123"}).status_code == 423
+    assert client.post("/api/auth/login", json={"username": "admin", "password": "Test-Admin-Pw1"}).status_code == 423
 
 
 def test_requires_auth(client):
@@ -115,7 +115,8 @@ def test_user_management(client):
 def test_websocket_receives_entry_event(client):
     h = login(client)
     token = h["Authorization"].split()[1]
-    with client.websocket_connect(f"/ws?token={token}") as ws:
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "auth", "token": token})
         assert ws.receive_json()["type"] == "hello"
         client.post("/api/entries/manual", json={"plate_number": "MH12AB1234"}, headers=h)
         types = set()
@@ -127,8 +128,16 @@ def test_websocket_receives_entry_event(client):
 def test_websocket_rejects_bad_token(client):
     import pytest
     from starlette.websockets import WebSocketDisconnect
+    for first in ({"type": "auth", "token": "bad"}, {"hello": 1}):
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws") as ws:
+                ws.send_json(first)
+                ws.receive_json()
+    # a media token (meant for <img> URLs) is not accepted here
+    media = client.post("/api/auth/media-token", headers=login(client)).json()["token"]
     with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect("/ws?token=bad") as ws:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_json({"type": "auth", "token": media})
             ws.receive_json()
 
 

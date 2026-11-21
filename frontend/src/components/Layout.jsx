@@ -1,14 +1,15 @@
 import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  Bell, BarChart3, Camera, Car, History, LayoutDashboard, LogIn, LogOut, Menu, MonitorPlay, ParkingSquare,
+  Bell, BarChart3, Camera, Car, History, KeyRound, LayoutDashboard, LogIn, LogOut, Menu, MonitorPlay, ParkingSquare,
   Settings, ShieldCheck, Users, X,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { useEvent, useRealtime } from "../lib/realtime";
 import { get } from "../lib/api";
 import { ROLES } from "../lib/format";
-import { Spinner, useToast } from "./ui";
+import { Modal, Spinner, useToast } from "./ui";
+import PasswordForm from "./PasswordForm";
 
 export const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, perm: "dashboard.view" },
@@ -28,6 +29,7 @@ export default function Layout() {
   const { connected } = useRealtime();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
+  const [pwOpen, setPwOpen] = useState(false);
   const toast = useToast();
   const nav = useNavigate();
   const loc = useLocation();
@@ -96,7 +98,10 @@ export default function Layout() {
                 {ROLES[user.role]}
               </p>
             </div>
-            <button onClick={() => logout().then(() => nav("/login"))} className="p-2 rounded-lg hover:bg-white/10" title="Sign out" aria-label="Sign out">
+            <button type="button" onClick={() => setPwOpen(true)} className="p-2 rounded-lg hover:bg-white/10" title="Change my password" aria-label="Change my password">
+              <KeyRound size={16} />
+            </button>
+            <button type="button" onClick={() => logout().then(() => nav("/login"))} className="p-2 rounded-lg hover:bg-white/10" title="Sign out" aria-label="Sign out">
               <LogOut size={16} />
             </button>
           </div>
@@ -132,6 +137,9 @@ export default function Layout() {
           <Suspense fallback={<Spinner />}>
             <Outlet />
           </Suspense>
+          <Modal open={pwOpen} onClose={() => setPwOpen(false)} title="Change my password">
+            <PasswordForm onDone={() => setPwOpen(false)} />
+          </Modal>
         </main>
       </div>
     </div>

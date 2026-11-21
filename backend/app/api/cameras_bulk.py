@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..anpr import rtsp_probe
 from ..anpr.manager import camera_manager
-from ..anpr.sources import build_stream_url
+from ..anpr.sources import build_stream_url, split_credentials
 from ..anpr.tracker import DEFAULT_ZONE
 from ..database import get_db
 from ..deps import client_ip, require
@@ -132,7 +132,9 @@ def _validate(db: Session, body: BulkIn) -> list[dict]:
             reserved.add(r["camera_code"])
         except ValueError as e:
             r["errors"].append(str(e))
-        url = c.rtsp_url.strip()
+        url, url_user, url_pw = split_credentials(c.rtsp_url.strip())
+        r["username"] = r["username"] if c.username else (url_user or r["username"])
+        r["password"] = r["password"] if c.password else (url_pw or r["password"])
         if not url:
             ip = r["ip_address"]
             if not ip:

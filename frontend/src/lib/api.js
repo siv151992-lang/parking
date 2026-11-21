@@ -67,11 +67,17 @@ export const post = (path, body) => api(path, { method: "POST", body: body ?? {}
 export const put = (path, body) => api(path, { method: "PUT", body });
 export const del = (path) => api(path, { method: "DELETE" });
 
+// Short-lived "media" token for <img> URLs (vehicle images, live video). It can only open
+// media, never call the API, so the real login token is never put in a URL.
+let mediaToken = null;
+export const setMediaToken = (t) => {
+  mediaToken = t;
+};
+
 // Authenticated URL for <img> tags (MJPEG streams, captured images).
 export const authUrl = (path) => {
-  if (!path) return null;
-  const t = getToken();
-  return `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(t || "")}`;
+  if (!path || !mediaToken) return null;
+  return `${path}${path.includes("?") ? "&" : "?"}token=${encodeURIComponent(mediaToken)}`;
 };
 
 export async function download(path, params, fallbackName) {

@@ -7,39 +7,63 @@ from sqlalchemy.orm import Session
 from .database import get_db
 from .models import User
 from .security import decode_token, has_permission
+from .services.timeutil import ensure_aware
 
 bearer = HTTPBearer(auto_error=False)
 
 
-def _user_from_token(token: str | None, db: Session) -> User:
+# Endpoints a user who must change the default password can still use.
+PASSWORD_CHANGE_ALLOWED = {"/api/auth/me", "/api/auth/change-password", "/api/auth/logout"}
+
+
+def user_from_token(token: str | None, db: Session, typ: str = "access") -> User:
+    """Validate a JWT of the given type and return its active user."""
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
     try:
         payload = decode_token(token)
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired") from None
     except jwt.PyJWTError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token") from None
+    if payload.get("typ", "access") != typ:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
-    user = db.get(User, int(payload["sub"]))
+    try:
+        user = db.get(User, int(payload["sub"]))
+    except (TypeError, ValueError):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token") from None
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User inactive or not found")
+    if user.tokens_valid_after and int(payload["iat"]) < int(ensure_aware(user.tokens_valid_after).timestamp()):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session ended, please log in again")
     return user
 
 
 def get_current_user(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: Session = Depends(get_db),
 ) -> User:
-    return _user_from_token(creds.credentials if creds else None, db)
+    user = user_from_token(creds.credentials if creds else None, db)
+    if user.must_change_password and request.url.path not in PASSWORD_CHANGE_ALLOWED:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "PASSWORD_CHANGE_REQUIRED")
+    return user
 
 
 def get_user_header_or_query(
+    request: Request,
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
     token: str | None = Query(None),
     db: Session = Depends(get_db),
 ) -> User:
-    """For <img>/<video> resources that cannot send headers (MJPEG, media files)."""
-    return _user_from_token(creds.credentials if creds else token, db)
+    """For <img> resources that cannot send headers (MJPEG, media files): the URL may only
+    carry a short-lived media token, never the full access token."""
+    if creds:
+        return get_current_user(request, creds, db)
+    user = user_from_token(token, db, typ="media")
+    if user.must_change_password:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "PASSWORD_CHANGE_REQUIRED")
+    return user
 
 
 def require(permission: str, allow_query_token: bool = False):
@@ -54,7 +78,7 @@ def require(permission: str, allow_query_token: bool = False):
 
 
 def client_ip(request: Request) -> str | None:
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    """The connecting client's address. Behind a reverse proxy, uvicorn's --proxy-headers
+    (trusted proxies only) already puts the real client here; X-Forwarded-For is not read
+    directly because any client could fake it."""
     return request.client.host if request.client else None

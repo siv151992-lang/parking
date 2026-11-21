@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from urllib.parse import quote, urlparse, urlunparse
+from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import cv2
 import numpy as np
@@ -15,6 +15,16 @@ os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp|stime
 
 class SourceError(Exception):
     pass
+
+
+def split_credentials(url: str) -> tuple[str, str, str]:
+    """rtsp://user:pass@host/path -> ("rtsp://host/path", "user", "pass"). Login details are kept in the
+    camera's username / password fields, never in the stored URL (which the API and audit log show)."""
+    p = urlparse(url or "")
+    if not p.scheme or p.username is None:
+        return url, "", ""
+    netloc = (p.hostname or "") + (f":{p.port}" if p.port else "")
+    return urlunparse(p._replace(netloc=netloc)), unquote(p.username or ""), unquote(p.password or "")
 
 
 def build_stream_url(rtsp_url: str, username: str = "", password: str = "") -> str:

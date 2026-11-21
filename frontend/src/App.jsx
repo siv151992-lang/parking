@@ -4,6 +4,7 @@ import Layout from "./components/Layout";
 import { Spinner } from "./components/ui";
 import { useAuth } from "./lib/auth";
 import { RealtimeProvider } from "./lib/realtime";
+import PasswordForm from "./components/PasswordForm";
 import Login from "./pages/Login";
 
 // Pages load on first visit, so the first screen downloads less.
@@ -29,6 +30,25 @@ function Guard({ perm, children }) {
   return children;
 }
 
+/** Shown instead of the app until the default password has been replaced (enforced by the server too). */
+function FirstPasswordChange() {
+  const { user, logout } = useAuth();
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-slate-50">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-4">
+        <div>
+          <h1 className="text-xl font-bold text-navy-900">Set a new password</h1>
+          <p className="text-sm text-slate-600 mt-1">
+            <b>{user.username}</b> still uses the default password, which everyone can look up. Choose your own password to continue.
+          </p>
+        </div>
+        <PasswordForm submitLabel="Save and continue" />
+        <button type="button" onClick={() => logout()} className="text-sm text-slate-500 hover:text-slate-800 underline">Sign out</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { user, loading } = useAuth();
   if (loading) return <Spinner />;
@@ -38,6 +58,7 @@ export default function App() {
         <Route path="*" element={<Login />} />
       </Routes>
     );
+  if (user.must_change_password) return <FirstPasswordChange />;
   return (
     <RealtimeProvider enabled={!!user}>
       <Routes>

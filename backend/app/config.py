@@ -60,9 +60,39 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
 
+INSECURE_SECRETS = {"", "change-me-in-production-use-a-long-random-string", "replace-with-a-long-random-secret"}
+SECRET_FILE = BASE_DIR / ".secret_key"
+
+
+def _ensure_secret_key(s: "Settings") -> None:
+    """Never sign tokens with a well-known or short key. Without a proper SECRET_KEY
+    a random key is generated once and kept in backend/.secret_key (owner-only)."""
+    if s.SECRET_KEY not in INSECURE_SECRETS and len(s.SECRET_KEY) >= 32:
+        return
+    import logging
+    import os
+    import secrets
+
+    try:
+        key = SECRET_FILE.read_text().strip()
+    except OSError:
+        key = ""
+    if len(key) < 32:
+        key = secrets.token_urlsafe(48)
+        try:
+            fd = os.open(SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(key)
+        except OSError:
+            logging.getLogger("config").warning("Could not save %s: sessions end when the server restarts", SECRET_FILE)
+    logging.getLogger("config").warning("SECRET_KEY is missing or insecure: using a generated key. Set SECRET_KEY in .env.")
+    s.SECRET_KEY = key
+
+
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
+    _ensure_secret_key(s)
     s.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
     return s
 

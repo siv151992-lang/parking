@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
-import jwt
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -16,7 +15,7 @@ from .api import admin, alerts, auth, cameras, cameras_bulk, dashboard, detectio
 from .config import BASE_DIR, settings
 from .database import SessionLocal, engine
 from .models import Alert, AlertType, DetectionStatus, ParkingSession, Role, SessionStatus, Severity, User, VehicleDetection
-from .security import decode_token, hash_password
+from .security import hash_password
 from .services import events, settings_store
 from .services.alerts import create_alert
 from .services.occupancy import ensure_capacity_rows, reconcile
@@ -45,7 +44,8 @@ def bootstrap():
     try:
         if db.query(User).count() == 0:
             db.add(User(username=settings.ADMIN_USERNAME, email=settings.ADMIN_EMAIL, full_name="Super Administrator",
-                        role=Role.SUPER_ADMIN, hashed_password=hash_password(settings.ADMIN_PASSWORD)))
+                        role=Role.SUPER_ADMIN, hashed_password=hash_password(settings.ADMIN_PASSWORD),
+                        must_change_password=settings.ADMIN_PASSWORD == "Admin@123"))
             log.warning("Created initial super admin '%s' - change the password after first login!", settings.ADMIN_USERNAME)
         else:
             owner = db.query(User).order_by(User.id).first()
@@ -53,6 +53,13 @@ def bootstrap():
                 owner.role, owner.is_active = Role.SUPER_ADMIN, True
                 log.warning("Restored owner account '%s' to active Super Admin", owner.username)
         ensure_capacity_rows(db)
+        # move login details typed into camera URLs into the username / password fields
+        from .anpr.sources import split_credentials
+        from .models import Camera
+        for cam in db.query(Camera).filter(Camera.rtsp_url.like("%@%")).all():
+            clean, user, pw = split_credentials(cam.rtsp_url)
+            if user:
+                cam.rtsp_url, cam.username, cam.password = clean, user, pw or cam.password
         db.commit()
     finally:
         db.close()
@@ -126,8 +133,41 @@ app = FastAPI(
                 "Authenticate with POST /api/auth/login, then use the bearer token.",
     lifespan=lifespan,
 )
+CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' ws: wss:; "
+    "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+)
+
+
+class SecurityHeaders:
+    """Adds browser security headers to every HTTP response (pure ASGI, so streams are untouched)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        docs = scope["path"].startswith(("/docs", "/redoc"))  # Swagger / ReDoc load their scripts from a CDN
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers += [(b"x-content-type-options", b"nosniff"), (b"x-frame-options", b"DENY"),
+                            (b"referrer-policy", b"no-referrer"),
+                            (b"permissions-policy", b"camera=(), microphone=(), geolocation=()")]
+                if not docs:
+                    headers.append((b"content-security-policy", CSP.encode()))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins_list, allow_credentials=True,
-                   allow_methods=["*"], allow_headers=["*"])
+                   allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Authorization", "Content-Type"])
+app.add_middleware(SecurityHeaders)
 
 for r in (auth, users, cameras, cameras_bulk, dashboard, transactions, vehicles, detections, occupancy, rows, reports, alerts, admin):
     app.include_router(r.router)
@@ -140,18 +180,40 @@ def health():
     return {"status": "ok", "cameras_running": len(camera_manager.workers)}
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket, token: str = ""):
-    """Real-time events: entry, exit, detection, occupancy, camera_status, alert.
-    Connect with ws://host/ws?token=<JWT>."""
+def _ws_user(token: str) -> dict | None:
+    """Check a WebSocket's token like any API request (signature, expiry, active user, session not ended)."""
+    from fastapi import HTTPException
+
+    from .deps import user_from_token
+
+    db = SessionLocal()
     try:
-        payload = decode_token(token)
-    except jwt.PyJWTError:
+        u = user_from_token(token, db)
+        return {"user_id": str(u.id), "role": u.role, "username": u.username}
+    except HTTPException:
+        return None
+    finally:
+        db.close()
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    """Real-time events: entry, exit, detection, occupancy, camera_status, alert.
+    After connecting, send {"type": "auth", "token": "<JWT>"} within 10 s (the token is not put
+    in the URL, where it would end up in logs). Then send "ping" to receive {"type": "pong"}."""
+    await ws.accept()
+    try:
+        first = await asyncio.wait_for(ws.receive_json(), timeout=10)
+        token = first.get("token", "") if isinstance(first, dict) and first.get("type") == "auth" else ""
+    except (asyncio.TimeoutError, WebSocketDisconnect, ValueError, KeyError):
+        token = ""
+    info = await asyncio.to_thread(_ws_user, token) if token else None
+    if info is None:
         await ws.close(code=4401)
         return
-    await events.manager.connect(ws, {"user_id": payload["sub"], "role": payload.get("role")})
+    await events.manager.connect(ws, info, accepted=True)
     try:
-        await ws.send_json({"type": "hello", "data": {"user": payload.get("username")}})
+        await ws.send_json({"type": "hello", "data": {"user": info["username"]}})
         while True:
             msg = await ws.receive_text()
             if msg == "ping":

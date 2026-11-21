@@ -9,6 +9,7 @@ from ..schemas import UserCreate, UserUpdate
 from ..security import PERMISSIONS, hash_password, validate_password_strength
 from ..serializers import user_out
 from ..services.audit import audit
+from ..services.timeutil import utcnow
 
 router = APIRouter(prefix="/api/users", tags=["User Management"])
 
@@ -83,8 +84,10 @@ def update_user(user_id: int, body: UserUpdate, request: Request, db: Session = 
             try:
                 validate_password_strength(pw)
             except ValueError as e:
-                raise HTTPException(400, str(e))
+                raise HTTPException(400, str(e)) from None
             u.hashed_password = hash_password(pw)
+            if u.id != user.id:
+                u.tokens_valid_after = utcnow().replace(microsecond=0)  # sign the user out everywhere
             changes["password"] = "changed"
     if "email" in changes and db.query(User).filter(User.email == changes["email"], User.id != u.id).first():
         raise HTTPException(409, "Email already in use")

@@ -16,7 +16,9 @@ os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", f"sqlite:///{_t
 os.environ["CAMERA_WORKERS_ENABLED"] = "false"
 os.environ["AUTO_MIGRATE"] = "false"
 os.environ["MEDIA_DIR"] = f"{_tmp}/media"
-os.environ["ADMIN_PASSWORD"] = "Admin@123"
+ADMIN_PW = "Test-Admin-Pw1"
+os.environ["ADMIN_PASSWORD"] = ADMIN_PW
+os.environ["SECRET_KEY"] = "test-secret-key-that-is-long-enough-for-hs256"
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -72,7 +74,7 @@ def make_user(db, username, role, password="Passw0rd!"):
     return u
 
 
-def login(client, username="admin", password="Admin@123"):
+def login(client, username="admin", password=ADMIN_PW):
     r = client.post("/api/auth/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}

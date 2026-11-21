@@ -59,17 +59,27 @@ def validate_password_strength(password: str) -> None:
         raise ValueError("Password must contain upper-case, lower-case letters and a digit")
 
 
-def create_access_token(user_id: int, username: str, role: str) -> str:
+MEDIA_TOKEN_MINUTES = 60
+# Compared against when a username does not exist, so a failed login always costs one bcrypt check
+# (otherwise the response time reveals which usernames exist).
+DUMMY_HASH = bcrypt.hashpw(b"no-such-user", bcrypt.gensalt(rounds=12)).decode("utf-8")
+
+
+def create_access_token(user_id: int, username: str, role: str, typ: str = "access") -> str:
+    """typ "access": full API token (Authorization header only).
+    typ "media": short-lived token that only opens images and live video, safe to put in <img src> URLs."""
     now = datetime.now(timezone.utc)
+    minutes = MEDIA_TOKEN_MINUTES if typ == "media" else settings.ACCESS_TOKEN_EXPIRE_MINUTES
     payload = {
         "sub": str(user_id),
         "username": username,
         "role": role,
+        "typ": typ,
         "iat": now,
-        "exp": now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        "exp": now + timedelta(minutes=minutes),
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
 def decode_token(token: str) -> dict:
-    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM], options={"require": ["exp", "iat", "sub"]})

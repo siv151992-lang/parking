@@ -366,18 +366,29 @@ def _r_accuracy(db, s, e, start, end, tz, sim):
 
 
 # ---------------------------------------------------------------- exporters
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def safe_cell(v):
+    """Text that Excel / LibreOffice would run as a formula (CSV / formula injection) is
+    prefixed with an apostrophe. Numbers and dates are left as they are."""
+    if isinstance(v, str) and v.startswith(_FORMULA_START):
+        return "'" + v
+    return v
+
+
 def to_csv(rep: dict) -> bytes:
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow([rep["title"]])
-    w.writerow([rep["facility"], rep["subtitle"], f"Generated {rep['generated_at']}"])
+    w.writerow([safe_cell(rep["title"])])
+    w.writerow([safe_cell(rep["facility"]), safe_cell(rep["subtitle"]), f"Generated {rep['generated_at']}"])
     w.writerow([])
     w.writerow([c["label"] for c in rep["columns"]])
     for r in rep["rows"]:
-        w.writerow([r.get(c["key"], "") for c in rep["columns"]])
+        w.writerow([safe_cell(r.get(c["key"], "")) for c in rep["columns"]])
     w.writerow([])
     for k, v in rep["summary"].items():
-        w.writerow([k, v])
+        w.writerow([safe_cell(k), safe_cell(v)])
     return buf.getvalue().encode("utf-8-sig")
 
 
@@ -392,7 +403,7 @@ def to_xlsx(rep: dict) -> bytes:
     ws.title = "Report"
     ws["A1"] = rep["title"]
     ws["A1"].font = Font(size=14, bold=True, color="0B2545")
-    ws["A2"] = f"{rep['facility']}  |  {rep['subtitle']}  |  Generated {rep['generated_at']}"
+    ws["A2"] = safe_cell(f"{rep['facility']}  |  {rep['subtitle']}  |  Generated {rep['generated_at']}")
     if rep.get("include_simulated"):
         ws["A3"] = "Includes simulated camera data"
         ws["A3"].font = Font(italic=True, color="C05621")
@@ -406,14 +417,14 @@ def to_xlsx(rep: dict) -> bytes:
         ws.column_dimensions[get_column_letter(i)].width = max(12, len(c["label"]) + 4)
     for ri, r in enumerate(rep["rows"], header_row + 1):
         for ci, c in enumerate(rep["columns"], 1):
-            ws.cell(row=ri, column=ci, value=r.get(c["key"], ""))
+            ws.cell(row=ri, column=ci, value=safe_cell(r.get(c["key"], "")))
     last = header_row + len(rep["rows"])
     ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
 
     sws = wb.create_sheet("Summary")
     for i, (k, v) in enumerate(rep["summary"].items(), 1):
-        sws.cell(row=i, column=1, value=k).font = Font(bold=True)
-        sws.cell(row=i, column=2, value=str(v))
+        sws.cell(row=i, column=1, value=safe_cell(k)).font = Font(bold=True)
+        sws.cell(row=i, column=2, value=safe_cell(str(v)))
     sws.column_dimensions["A"].width = 32
     sws.column_dimensions["B"].width = 40
 
@@ -444,6 +455,8 @@ def to_pdf(rep: dict) -> bytes:
     from reportlab.lib.units import mm
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+    from xml.sax.saxutils import escape  # Paragraph text is markup: escape user-controlled values
+
     buf = io.BytesIO()
     page = landscape(A4) if len(rep["columns"]) > 6 else A4
     doc = SimpleDocTemplate(buf, pagesize=page, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=12 * mm, bottomMargin=12 * mm,
@@ -451,8 +464,9 @@ def to_pdf(rep: dict) -> bytes:
     styles = getSampleStyleSheet()
     navy = colors.HexColor("#0B2545")
     story = [
-        Paragraph(f"<font color='#0B2545'><b>{rep['title']}</b></font>", styles["Title"]),
-        Paragraph(f"{rep['facility']} &nbsp;|&nbsp; {rep['subtitle']} &nbsp;|&nbsp; Generated {rep['generated_at']}", styles["Normal"]),
+        Paragraph(f"<font color='#0B2545'><b>{escape(rep['title'])}</b></font>", styles["Title"]),
+        Paragraph(f"{escape(str(rep['facility']))} &nbsp;|&nbsp; {escape(str(rep['subtitle']))} &nbsp;|&nbsp; "
+                  f"Generated {escape(str(rep['generated_at']))}", styles["Normal"]),
     ]
     if rep.get("include_simulated"):
         story.append(Paragraph("<font color='#C05621'><i>Includes simulated camera data</i></font>", styles["Normal"]))
@@ -482,7 +496,7 @@ def to_pdf(rep: dict) -> bytes:
             for i in range(len(series)):
                 bc.bars[i].fillColor = palette[i % 3]
             dwg.add(bc)
-            story += [dwg, Paragraph(" / ".join(f"<font color='{['#1D4ED8', '#F59E0B', '#DC2626'][i % 3]}'>■</font> {s}" for i, s in enumerate(series)), styles["Normal"]), Spacer(1, 5 * mm)]
+            story += [dwg, Paragraph(" / ".join(f"<font color='{['#1D4ED8', '#F59E0B', '#DC2626'][i % 3]}'>■</font> {escape(str(s))}" for i, s in enumerate(series)), styles["Normal"]), Spacer(1, 5 * mm)]
 
     data = [[c["label"] for c in rep["columns"]]] + [[str(r.get(c["key"], "")) for c in rep["columns"]] for r in rep["rows"]]
     if len(data) == 1:

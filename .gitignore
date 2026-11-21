@@ -15,3 +15,4 @@ frontend/.env
 .vscode/
 .idea/
 .env.old
+backend/.secret_key

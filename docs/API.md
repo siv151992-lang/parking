@@ -15,9 +15,13 @@ curl -X POST http://localhost:8000/api/auth/login \
 # → {"access_token":"eyJ...","token_type":"bearer","user":{...,"permissions":[...]}}
 ```
 
-Send `Authorization: Bearer <token>` on every request. Endpoints used by `<img>` tags (MJPEG stream, snapshots, captured images) also accept `?token=<token>`.
+Send `Authorization: Bearer <token>` on every request. The access token is never accepted in a URL.
 
-After 5 failed logins an account is locked for 15 minutes (HTTP 423).
+Endpoints used by `<img>` tags (MJPEG stream, snapshots, captured images) also accept `?token=<media token>`. Get one with `POST /api/auth/media-token`: it is valid for 60 minutes and can only open media, never call the API.
+
+* After 5 failed logins an account is locked for 15 minutes (HTTP 423). After 30 failed logins from one address, that address is blocked for 15 minutes (HTTP 429).
+* Logging in with the default password `Admin@123` sets `must_change_password`. Until the password is changed, every endpoint except `/api/auth/me`, `/api/auth/change-password` and `/api/auth/logout` answers `403 PASSWORD_CHANGE_REQUIRED`.
+* Changing a password signs out every other session of that account (the response contains a new `access_token`). An admin resetting someone's password signs that user out.
 
 ## Endpoints
 
@@ -26,7 +30,8 @@ After 5 failed logins an account is locked for 15 minutes (HTTP 423).
 | POST | `/api/auth/login` | – | Get a JWT |
 | GET | `/api/auth/me` | any | Current user and permissions |
 | POST | `/api/auth/logout` | any | Audit-logged logout |
-| POST | `/api/auth/change-password` | any | Change own password |
+| POST | `/api/auth/change-password` | any | Change own password; returns a new token, other sessions end |
+| POST | `/api/auth/media-token` | any | 60-minute token for `<img>` URLs |
 | GET | `/api/dashboard/stats` | dashboard.view | Entries / exits today, inside, capacity, available, occupancy %, type counts, cameras online / offline, duplicates blocked |
 | GET | `/api/dashboard/hourly` | dashboard.view | Today's entries and exits per hour |
 | GET | `/api/dashboard/recent-detections?limit=` | dashboard.view | Latest plate detections |
@@ -79,7 +84,7 @@ Report types: `daily_entry`, `daily_exit`, `hourly`, `weekly`, `monthly`, `categ
 
 ## WebSocket
 
-`ws://<server>:8000/ws?token=<JWT>`. Send `"ping"` to receive `{"type":"pong"}`.
+`ws://<server>:8000/ws`. Within 10 seconds of connecting, send `{"type": "auth", "token": "<access token>"}` (the token is not put in the URL, where it would be logged). The server answers `{"type": "hello"}` or closes with code 4401. Send `"ping"` to receive `{"type":"pong"}`.
 
 Every message has the form `{"type": "...", "data": {...}, "ts": "ISO-8601"}`.
 
