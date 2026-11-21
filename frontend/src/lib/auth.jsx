@@ -5,7 +5,7 @@ const AuthCtx = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!getToken()); // nothing to check without a token
 
   const logout = useCallback(async (callServer = true) => {
     if (callServer && getToken()) {
@@ -24,10 +24,7 @@ export function AuthProvider({ children }) {
       setToken(null);
       setUser(null);
     });
-    if (!getToken()) {
-      setLoading(false);
-      return;
-    }
+    if (!getToken()) return;
     get("/api/auth/me")
       .then(setUser)
       .catch(() => setToken(null))

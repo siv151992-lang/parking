@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getToken } from "./api";
 
 // One WebSocket per browser tab; components subscribe to event types.
@@ -72,7 +72,9 @@ export const useRealtime = () => useContext(RtCtx);
 export function useEvent(types, handler) {
   const { subscribe } = useRealtime();
   const ref = useRef(handler);
-  ref.current = handler;
+  useLayoutEffect(() => {
+    ref.current = handler;
+  });
   const key = Array.isArray(types) ? types.join(",") : types;
   useEffect(() => subscribe(key.split(","), (d, m) => ref.current(d, m)), [key]); // eslint-disable-line react-hooks/exhaustive-deps
 }

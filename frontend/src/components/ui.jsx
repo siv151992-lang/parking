@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Info, Loader2, X, XCircle } from "lucide-react";
 
 // Chart palette: validated reference categorical slots 1-3 (fixed order).
@@ -271,24 +271,35 @@ export function ToastProvider({ children }) {
 }
 export const useToast = () => useContext(ToastCtx);
 
-/** Small data-fetch hook. */
+/** Small data-fetch hook. Refetches when `deps` change. Only the newest request may update
+ * the state: a slow older response (or one arriving after unmount) is ignored.
+ * `loading` is true until the first response for the current `deps` has arrived. */
 export function useFetch(fn, deps = []) {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const depKey = JSON.stringify(deps);
+  const [result, setResult] = useState({ key: null, data: null, error: null });
+  const fnRef = useRef(fn);
+  const keyRef = useRef(depKey);
+  const seq = useRef(0);
+  useLayoutEffect(() => {
+    fnRef.current = fn;
+  });
   const load = useCallback(async () => {
+    const id = ++seq.current;
+    const key = keyRef.current;
     try {
-      setData(await fn());
-      setError(null);
+      const data = await fnRef.current();
+      if (id === seq.current) setResult({ key, data, error: null });
     } catch (e) {
-      setError(e);
-    } finally {
-      setLoading(false);
+      if (id === seq.current) setResult((r) => ({ ...r, key, error: e }));
     }
-  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
-    setLoading(true);
+    keyRef.current = depKey;
     load();
-  }, [load]);
-  return { data, error, loading, reload: load, setData };
+    return () => {
+      seq.current += 1; // ignore this request's response from now on
+    };
+  }, [depKey, load]);
+  const setData = useCallback((v) => setResult((r) => ({ ...r, data: typeof v === "function" ? v(r.data) : v })), []);
+  return { data: result.data, error: result.error, loading: result.key !== depKey, reload: load, setData };
 }

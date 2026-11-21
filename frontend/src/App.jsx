@@ -1,19 +1,22 @@
+import { lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import { Spinner } from "./components/ui";
 import { useAuth } from "./lib/auth";
 import { RealtimeProvider } from "./lib/realtime";
-import Alerts from "./pages/Alerts";
-import CameraManagement from "./pages/CameraManagement";
-import Dashboard from "./pages/Dashboard";
-import LiveMonitoring from "./pages/LiveMonitoring";
 import Login from "./pages/Login";
-import Occupancy from "./pages/Occupancy";
-import Reports from "./pages/Reports";
-import Settings from "./pages/Settings";
-import Users from "./pages/Users";
-import InOut from "./pages/InOut";
-import VehicleHistory from "./pages/VehicleHistory";
+
+// Pages load on first visit, so the first screen downloads less.
+const Alerts = lazy(() => import("./pages/Alerts"));
+const CameraManagement = lazy(() => import("./pages/CameraManagement"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const LiveMonitoring = lazy(() => import("./pages/LiveMonitoring"));
+const Occupancy = lazy(() => import("./pages/Occupancy"));
+const Reports = lazy(() => import("./pages/Reports"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Users = lazy(() => import("./pages/Users"));
+const InOut = lazy(() => import("./pages/InOut"));
+const VehicleHistory = lazy(() => import("./pages/VehicleHistory"));
 
 function Guard({ perm, children }) {
   const { can } = useAuth();

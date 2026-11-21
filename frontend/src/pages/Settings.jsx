@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Save } from "lucide-react";
 import { get, post, put } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -48,11 +48,11 @@ export default function Settings() {
   const { can } = useAuth();
   const toast = useToast();
   const st = useFetch(() => get("/api/settings"), []);
-  const [vals, setVals] = useState({});
+  const [edits, setEdits] = useState({});
+  // saved values with the user's unsaved edits on top
+  const vals = { ...Object.fromEntries((st.data || []).map((s) => [s.key, s.value])), ...edits };
+  const setVals = (next) => setEdits(next);
   const [pw, setPw] = useState({ current_password: "", new_password: "" });
-  useEffect(() => {
-    if (st.data) setVals(Object.fromEntries(st.data.map((s) => [s.key, s.value])));
-  }, [st.data]);
 
   const save = async () => {
     const changes = {};
@@ -66,6 +66,7 @@ export default function Settings() {
     try {
       await put("/api/settings", changes);
       toast("Settings saved", "success");
+      setEdits({});
       st.reload();
     } catch (e) {
       toast(e.message, "error");

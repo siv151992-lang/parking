@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   Bell, BarChart3, Camera, Car, History, LayoutDashboard, LogIn, LogOut, Menu, MonitorPlay, ParkingSquare,
@@ -8,7 +8,7 @@ import { useAuth } from "../lib/auth";
 import { useEvent, useRealtime } from "../lib/realtime";
 import { get } from "../lib/api";
 import { ROLES } from "../lib/format";
-import { useToast } from "./ui";
+import { Spinner, useToast } from "./ui";
 
 export const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, perm: "dashboard.view" },
@@ -32,7 +32,6 @@ export default function Layout() {
   const nav = useNavigate();
   const loc = useLocation();
 
-  useEffect(() => setOpen(false), [loc.pathname]);
   useEffect(() => {
     if (can("alerts.view")) get("/api/alerts", { page_size: 1 }).then((r) => setUnread(r.unread)).catch(() => {});
   }, [can]);
@@ -72,6 +71,7 @@ export default function Layout() {
             )}
             <NavLink
               to={to}
+              onClick={() => setOpen(false)}
               end={to === "/"}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition ${isActive ? "bg-white text-navy-900" : "hover:bg-white/10 hover:text-white"}`
@@ -129,7 +129,9 @@ export default function Layout() {
           </div>
         </header>
         <main className="flex-1 p-4 sm:p-6 max-w-[1600px] w-full mx-auto">
-          <Outlet />
+          <Suspense fallback={<Spinner />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>
