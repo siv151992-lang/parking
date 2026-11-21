@@ -177,20 +177,23 @@ def seed_offices(db, rng: random.Random):
         db.flush()
         people.append((u, v))
     db.commit()
-    # a few bookings today and tomorrow (office hours, Head Office zone A)
+    # demo bookings around the current time: one parked now, two arriving later today, three tomorrow
     hq = db.query(Office).filter(Office.name == "Head Office").first()
     slots = db.query(ParkingSlot).filter(ParkingSlot.office_id == hq.id, ParkingSlot.code.like("A-%")).order_by(ParkingSlot.code).all()
     tz = facility_tz(db)
-    today = datetime.now(tz).date()
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    tomorrow = datetime.now(tz).date() + timedelta(days=1)
+    plan = [(now - timedelta(hours=1), now + timedelta(hours=5), BookingStatus.CHECKED_IN),
+            (now + timedelta(minutes=45), now + timedelta(hours=6), BookingStatus.CONFIRMED),
+            (now + timedelta(hours=2), now + timedelta(hours=7), BookingStatus.CONFIRMED)]
     for i, (u, v) in enumerate(people[:3]):
-        for day in (today, today + timedelta(days=1)):
-            start = datetime.combine(day, time(9, 0), tzinfo=tz)
-            end = datetime.combine(day, time(18, 0), tzinfo=tz)
+        windows = [plan[i], (datetime.combine(tomorrow, time(9, 0), tzinfo=tz).astimezone(timezone.utc),
+                             datetime.combine(tomorrow, time(18, 0), tzinfo=tz).astimezone(timezone.utc), BookingStatus.CONFIRMED)]
+        for start, end, status in windows:
             db.add(SlotBooking(code=new_code(db), qr_token=secrets.token_urlsafe(18), user_id=u.id, office_id=hq.id,
                                slot_id=slots[i + 3].id, slot_code=slots[i + 3].code, vehicle_id=v.id,
-                               plate_number=v.plate_number, vehicle_type=v.vehicle_type,
-                               start_at=start.astimezone(timezone.utc), end_at=end.astimezone(timezone.utc),
-                               status=BookingStatus.CONFIRMED))
+                               plate_number=v.plate_number, vehicle_type=v.vehicle_type, start_at=start, end_at=end,
+                               status=status, checked_in_at=start if status == BookingStatus.CHECKED_IN else None))
             db.flush()
     db.commit()
     print(f"Office parking: {len(OFFICES)} offices, {len(EMPLOYEES)} employees (password {EMPLOYEE_PASSWORD})")

@@ -4,22 +4,23 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:8000';
 const NEW_PW = process.env.ADMIN_PW || 'E2e-Admin-pw1';
-const PAGES = ['/', '/live', '/entries', '/entries?tab=exit', '/history', '/alerts', '/reports', '/occupancy', '/cameras', '/users', '/settings'];
+const PAGES = ['/', '/live', '/entries', '/entries?tab=exit', '/history', '/alerts', '/reports', '/occupancy', '/cameras', '/users', '/settings', '/security', '/bookings', '/offices', '/park', '/park/office/1', '/park/bookings', '/park/vehicles', '/park/profile'];
 const SIZES = { phone: { width: 390, height: 844 }, tablet: { width: 820, height: 1180 }, desktop: { width: 1440, height: 900 } };
 fs.mkdirSync('shots', { recursive: true });
 
 (async () => {
   const b = await chromium.launch();
+  const TZ = { timezoneId: 'Asia/Kolkata' };
   const issues = [];
   const watch = (p, where) => {
     p.on('pageerror', (e) => issues.push(`[${where()}] pageerror: ${e.message}`));
-    p.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') issues.push(`[${where()}] console.${m.type()}: ${m.text().slice(0, 200)}`); });
+    p.on('console', (m) => { if ((m.type() === 'error' || m.type() === 'warning') && !m.text().includes('ERR_TUNNEL_CONNECTION_FAILED')) issues.push(`[${where()}] console.${m.type()}: ${m.text().slice(0, 200)}`); });
     p.on('response', (r) => { if (r.status() >= 400 && !r.url().includes('/snapshot')) issues.push(`[${where()}] HTTP ${r.status()} ${r.request().method()} ${r.url().replace(BASE, '')}`); });
-    p.on('requestfailed', (r) => { const f = r.failure()?.errorText || ''; if (!f.includes('ERR_ABORTED')) issues.push(`[${where()}] request failed ${r.url().replace(BASE, '')} ${f}`); });
+    p.on('requestfailed', (r) => { const f = r.failure()?.errorText || ''; if (!f.includes('ERR_ABORTED') && !r.url().includes('tile.openstreetmap')) issues.push(`[${where()}] request failed ${r.url().replace(BASE, '')} ${f}`); });
   };
 
   // 1. first login with the default password -> forced change
-  const ctx = await b.newContext({ viewport: SIZES.desktop });
+  const ctx = await b.newContext({ viewport: SIZES.desktop, ...TZ });
   const p = await ctx.newPage();
   let here = 'login';
   watch(p, () => here);

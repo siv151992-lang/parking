@@ -1,4 +1,4 @@
-import { lazy } from "react";
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
 import { Spinner } from "./components/ui";
@@ -18,6 +18,18 @@ const Settings = lazy(() => import("./pages/Settings"));
 const Users = lazy(() => import("./pages/Users"));
 const InOut = lazy(() => import("./pages/InOut"));
 const VehicleHistory = lazy(() => import("./pages/VehicleHistory"));
+// office parking (TypeScript)
+const ParkLayout = lazy(() => import("./parking/ParkLayout"));
+const FindParking = lazy(() => import("./parking/FindParking"));
+const OfficeBooking = lazy(() => import("./parking/OfficeBooking"));
+const MyBookings = lazy(() => import("./parking/MyBookings"));
+const BookingDetail = lazy(() => import("./parking/MyBookings").then((m) => ({ default: m.BookingDetail })));
+const MyVehicles = lazy(() => import("./parking/MyAccount").then((m) => ({ default: m.MyVehicles })));
+const MyProfile = lazy(() => import("./parking/MyAccount").then((m) => ({ default: m.MyProfile })));
+const Register = lazy(() => import("./parking/Register"));
+const SecurityDesk = lazy(() => import("./parking/SecurityDesk"));
+const BookingsAdmin = lazy(() => import("./parking/BookingsAdmin"));
+const OfficesAdmin = lazy(() => import("./parking/OfficesAdmin"));
 
 function Guard({ perm, children }) {
   const { can } = useAuth();
@@ -54,15 +66,41 @@ export default function App() {
   if (loading) return <Spinner />;
   if (!user)
     return (
-      <Routes>
-        <Route path="*" element={<Login />} />
-      </Routes>
+      <Suspense fallback={<Spinner />}>
+        <Routes>
+          <Route path="/register" element={<Register />} />
+          <Route path="*" element={<Login />} />
+        </Routes>
+      </Suspense>
     );
   if (user.must_change_password) return <FirstPasswordChange />;
+  const parkRoutes = (
+    <Route path="park" element={<Guard perm="bookings.own"><ParkLayout /></Guard>}>
+      <Route index element={<FindParking />} />
+      <Route path="office/:id" element={<OfficeBooking />} />
+      <Route path="bookings" element={<MyBookings />} />
+      <Route path="bookings/:id" element={<BookingDetail />} />
+      <Route path="vehicles" element={<MyVehicles />} />
+      <Route path="profile" element={<MyProfile />} />
+    </Route>
+  );
+  if (user.role === "EMPLOYEE")
+    return (
+      <RealtimeProvider enabled>
+        <Suspense fallback={<Spinner />}>
+          <Routes>
+            {parkRoutes}
+            <Route path="*" element={<Navigate to="/park" replace />} />
+          </Routes>
+        </Suspense>
+      </RealtimeProvider>
+    );
   return (
     <RealtimeProvider enabled={!!user}>
       <Routes>
         <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/register" element={<Navigate to="/" replace />} />
+        {parkRoutes}
         <Route element={<Layout />}>
           <Route index element={<Guard perm="dashboard.view"><Dashboard /></Guard>} />
           <Route path="live" element={<Guard perm="cameras.view"><LiveMonitoring /></Guard>} />
@@ -75,6 +113,9 @@ export default function App() {
           <Route path="alerts" element={<Guard perm="alerts.view"><Alerts /></Guard>} />
           <Route path="users" element={<Guard perm="users.manage"><Users /></Guard>} />
           <Route path="settings" element={<Guard perm="settings.view"><Settings /></Guard>} />
+          <Route path="security" element={<Guard perm="bookings.verify"><SecurityDesk /></Guard>} />
+          <Route path="bookings" element={<Guard perm="bookings.verify"><BookingsAdmin /></Guard>} />
+          <Route path="offices" element={<Guard perm="offices.manage"><OfficesAdmin /></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

@@ -1,7 +1,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
-  Bell, BarChart3, Camera, Car, History, KeyRound, LayoutDashboard, LogIn, LogOut, Menu, MonitorPlay, ParkingSquare,
+  Bell, BarChart3, Building2, CalendarCheck, Camera, Car, History, KeyRound, MapPin, ScanLine, LayoutDashboard, LogIn, LogOut, Menu, MonitorPlay, ParkingSquare,
   Settings, ShieldCheck, Users, X,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
@@ -14,10 +14,14 @@ import PasswordForm from "./PasswordForm";
 export const NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, perm: "dashboard.view" },
   { to: "/live", label: "Live Cameras", icon: MonitorPlay, perm: "cameras.view" },
+  { to: "/security", label: "Security Desk", icon: ScanLine, perm: "bookings.verify" },
+  { to: "/bookings", label: "Slot Bookings", icon: CalendarCheck, perm: "bookings.verify" },
+  { to: "/park", label: "Book Parking", icon: MapPin, perm: "bookings.own" },
   { to: "/entries", label: "Vehicles In / Out", icon: LogIn, perm: "vehicles.view" },
   { to: "/history", label: "Vehicle History", icon: History, perm: "vehicles.view" },
   { to: "/alerts", label: "Alerts", icon: Bell, perm: "alerts.view" },
   { to: "/reports", label: "Reports", icon: BarChart3, perm: "reports.view" },
+  { to: "/offices", label: "Offices & Slots", icon: Building2, perm: "offices.manage", group: "Setup" },
   { to: "/occupancy", label: "Parking Spaces", icon: ParkingSquare, perm: "occupancy.view", group: "Setup" },
   { to: "/cameras", label: "Cameras", icon: Camera, perm: "cameras.view", group: "Setup" },
   { to: "/users", label: "Users", icon: Users, perm: "users.manage", group: "Setup" },

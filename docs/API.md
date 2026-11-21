@@ -82,6 +82,35 @@ Endpoints used by `<img>` tags (MJPEG stream, snapshots, captured images) also a
 
 Report types: `daily_entry`, `daily_exit`, `hourly`, `weekly`, `monthly`, `category`, `camera`, `occupancy`, `peak_hours`, `accuracy`.
 
+## Office parking
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/api/auth/signup-info` | – | Whether employees can self-register, and the allowed email domains |
+| POST | `/api/auth/register` | – | Employee self-registration `{full_name, email, password, phone, department}` |
+| GET | `/api/offices?start=&end=&vehicle_type=` | offices.view | Offices with free / EV / accessible / visitor slot counts for the window |
+| GET | `/api/offices/{id}/availability?start=&end=` | offices.view | Every slot with its state (AVAILABLE, BOOKED, OCCUPIED, MINE, ASSIGNED, OUT_OF_SERVICE); security also gets who is in it |
+| POST / PUT / DELETE | `/api/offices[/{id}]` | offices.manage | Offices |
+| POST | `/api/offices/{id}/floors`, `/api/floors/{id}/zones` | offices.manage | Add floor / zone; PUT / DELETE `/api/floors/{id}`, `/api/zones/{id}` |
+| GET | `/api/offices/{id}/slots` | offices.manage | Slots of an office |
+| POST | `/api/zones/{id}/slots` | offices.manage | Create slots in bulk `{prefix, start, count, digits, vehicle_type, is_ev, is_accessible, is_visitor}` |
+| PUT / DELETE | `/api/slots/{id}` | offices.manage | Edit (incl. `assigned_user_id`, `status`) / delete a slot |
+| GET / POST / PUT / DELETE | `/api/me/vehicles[/{id}]` | bookings.own | My vehicles |
+| PUT | `/api/me/profile` | bookings.own | Name, phone, department |
+| POST | `/api/bookings` | bookings.own | Book `{office_id, start_at, end_at, vehicle_id | visitor, slot_id?, prefer_ev, prefer_accessible, notes}` |
+| GET | `/api/me/bookings?scope=upcoming|past|all` | bookings.own | My bookings (with QR payload) |
+| GET | `/api/bookings/{id}` | bookings.own | One booking (own; security sees all) with `verdict` |
+| PUT | `/api/bookings/{id}` | bookings.own | Change `{start_at, end_at}` (only the end once checked in) |
+| POST | `/api/bookings/{id}/cancel` | bookings.own | Cancel `{reason}` (own; managers any) |
+| POST | `/api/bookings/scan` | bookings.verify | Look up by QR text, booking code or vehicle number; returns `verdict` |
+| POST | `/api/bookings/{id}/check-in`, `/check-out` | bookings.verify | Security check-in / check-out |
+| GET | `/api/bookings?day=&office_id=&status=&q=` | bookings.verify | All bookings of a day, with status counts |
+| GET | `/api/people?q=` | bookings.manage | Find people (assign slots) |
+
+Booking errors come back as 400 (rule broken), 404 (not found / not yours) or 409 (slot taken, limit reached, wrong state) with a plain-language `detail`.
+
+WebSocket event `booking` is sent on every booking change.
+
 ## WebSocket
 
 `ws://<server>:8000/ws`. Within 10 seconds of connecting, send `{"type": "auth", "token": "<access token>"}` (the token is not put in the URL, where it would be logged). The server answers `{"type": "hello"}` or closes with code 4401. Send `"ping"` to receive `{"type":"pong"}`.

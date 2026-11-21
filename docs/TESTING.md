@@ -1,6 +1,6 @@
 # Testing
 
-## Automated tests (80 tests)
+## Automated tests (90 tests)
 
 ```bash
 cd backend
@@ -16,7 +16,7 @@ The PostgreSQL run is recommended before every deployment, because it exercises 
 | `tests/test_tracker.py` | One event per vehicle crossing the line, one event for a vehicle waiting 200 frames at a barrier, no event outside the zone, two vehicles → two events, plate voting (whole string and per character), plate utilities |
 | `tests/test_api.py` | Login, lockout, auth required, RBAC per role, camera CRUD + inject, manual flow + history, capacity, all 10 reports × CSV / XLSX / PDF, settings validation, audit log, user management, WebSocket events, WebSocket auth |
 
-Frontend: `cd frontend && npm run lint && npm run build`. Browser tests (Playwright): see `e2e/README.md`.
+Frontend: `cd frontend && npm run lint && npm run build` (lint runs ESLint and the TypeScript type check). Browser tests (Playwright): see `e2e/README.md`.
 
 ## Manual end-to-end test with simulated cameras
 

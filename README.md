@@ -29,6 +29,10 @@ A **camera simulation mode** lets you run and test everything without camera har
 
 On macOS / Linux, run `./start.sh` instead.
 
+## Office parking reservations
+
+Employees book a parking slot at an office for themselves or a visitor, show a QR code at the gate, and security checks them in and out. Offices, floors, zones and slots are set up in **Offices & Slots**. See [docs/OFFICE_PARKING.md](docs/OFFICE_PARKING.md).
+
 ## Set up your car park
 
 1. **Parking Spaces → Add row**: one entry per row (e.g. *Row A*, 40 spaces).
@@ -128,12 +132,13 @@ For production, run `npm run build`; the backend then serves the UI itself at <h
 | `manager` | `Manager@123` | Parking Manager (seed) |
 | `operator` | `Operator@123` | Security Operator (seed) |
 | `viewer` | `Viewer@123` | Report Viewer (seed) |
+| `asha`, `vikram`, `meera`, `arjun` | `Employee@123` | Employees with vehicles and bookings (seed) |
 
 ## Development checks
 
 ```bash
-cd backend && pytest -q                 # 80 tests (SQLite); TEST_DATABASE_URL=... for PostgreSQL
-cd frontend && npm run lint && npm run build
+cd backend && pytest -q                 # 90 tests (SQLite); TEST_DATABASE_URL=... for PostgreSQL
+cd frontend && npm run lint && npm run build      # lint = ESLint + TypeScript type check
 pip-audit -r backend/requirements.txt && (cd frontend && npm audit)   # known vulnerabilities
 ```
 
@@ -159,5 +164,6 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 * [Architecture & database design](docs/ARCHITECTURE.md)
 * [API reference (REST + WebSocket)](docs/API.md)
 * [Camera configuration & simulation mode](docs/CAMERAS.md)
+* [Office parking reservations](docs/OFFICE_PARKING.md)
 * [Testing](docs/TESTING.md)
 * [Deployment: Docker, Linux, Windows, cloud](docs/DEPLOYMENT.md)

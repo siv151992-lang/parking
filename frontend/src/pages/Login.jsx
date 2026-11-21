@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Camera, Lock, User } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { Button, inputCls } from "../components/ui";
@@ -69,6 +69,9 @@ export default function Login() {
             Sign in
           </Button>
           <p className="text-[11px] text-slate-400 text-center">Accounts are locked for 15 minutes after 5 failed attempts.</p>
+          <p className="text-sm text-slate-500 text-center">
+            Employee without an account? <Link to="/register" className="font-semibold text-navy-700 hover:underline">Create one</Link>
+          </p>
         </form>
       </div>
     </div>

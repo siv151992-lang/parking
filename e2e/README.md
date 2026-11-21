@@ -13,4 +13,10 @@ ADMIN_PW='E2e-Admin-pw1' node e2e/flows.js   # 21 workflows: entries/exits, canc
 ADMIN_PW='E2e-Admin-pw1' node e2e/crawl.js   # every page at phone / tablet / desktop: console errors, failed requests, overflow
 ```
 
+Office parking (13 workflows: employee booking, visitor booking, change / cancel, vehicles, profile, slot map, security desk check-in / out, office and slot setup, bookings list) on a fresh demo database:
+
+```bash
+./e2e/run-booking.sh        # recreates the e2e_booking database, seeds it, starts the app, runs e2e/booking.js
+```
+
 `flows.js` prints PASS / FAIL per workflow. `crawl.js` writes `issues.txt` and screenshots to `shots/`.

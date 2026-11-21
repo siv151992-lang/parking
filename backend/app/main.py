@@ -162,7 +162,7 @@ app = FastAPI(
 )
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-    "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' ws: wss:; "
+    "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self' ws: wss:; "
     "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 )
 
@@ -183,7 +183,7 @@ class SecurityHeaders:
                 headers = list(message.get("headers", []))
                 headers += [(b"x-content-type-options", b"nosniff"), (b"x-frame-options", b"DENY"),
                             (b"referrer-policy", b"no-referrer"),
-                            (b"permissions-policy", b"camera=(), microphone=(), geolocation=()")]
+                            (b"permissions-policy", b"camera=(self), microphone=(), geolocation=(self)")]
                 if not docs:
                     headers.append((b"content-security-policy", CSP.encode()))
                 message["headers"] = headers

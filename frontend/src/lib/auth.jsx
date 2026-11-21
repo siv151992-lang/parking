@@ -61,6 +61,14 @@ export function AuthProvider({ children }) {
     return r.user;
   };
 
+  /** Employee self-registration (only allowed company email domains); signs the new account in. */
+  const register = async (body) => {
+    const r = await post("/api/auth/register", body);
+    setToken(r.access_token);
+    await adopt(r.user);
+    return r.user;
+  };
+
   /** Change your own password. Other sessions of the account are signed out; this one gets a new token. */
   const changePassword = async (current_password, new_password) => {
     const r = await post("/api/auth/change-password", { current_password, new_password });
@@ -70,7 +78,7 @@ export function AuthProvider({ children }) {
 
   const can = useCallback((perm) => !!user?.permissions?.includes(perm), [user]);
 
-  return <AuthCtx.Provider value={{ user, loading, login, logout, can, changePassword }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ user, loading, login, logout, can, changePassword, register, setUser }}>{children}</AuthCtx.Provider>;
 }
 
 export const useAuth = () => useContext(AuthCtx);
