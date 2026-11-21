@@ -44,7 +44,7 @@ function LiveSnapshot({ cam, interval = 1000, onError }) {
   }, [visible, cam.id, interval, onError]);
   return (
     <div ref={ref} className="w-full h-full flex items-center justify-center">
-      {src ? <img src={src} alt={cam.name} className="w-full h-full object-contain" /> : <span className="text-xs text-slate-500">Loading…</span>}
+      {src ? <img src={src} alt={cam.name} className="max-w-full w-full h-full object-contain" /> : <span className="text-xs text-slate-500">Loading…</span>}
     </div>
   );
 }
@@ -54,7 +54,7 @@ function CameraTile({ cam, onExpand }) {
   const [err, setErr] = useState(false);
   const live = cam.status === "ONLINE" || cam.status === "CONNECTING" || cam.status === "OFFLINE";
   return (
-    <div className="bg-navy-950 rounded-xl overflow-hidden shadow-sm ring-1 ring-navy-800 flex flex-col">
+    <div className="min-w-0 bg-navy-950 rounded-xl overflow-hidden shadow-sm ring-1 ring-navy-800 flex flex-col">
       <div className="relative aspect-video bg-black flex items-center justify-center">
         {cam.is_enabled && live && !err ? (
           <button type="button" key={key} className="w-full h-full" onClick={() => onExpand(cam)} title="Open live video">
@@ -139,8 +139,8 @@ export default function LiveMonitoring() {
         )}
       </PageHeader>
 
-      <div className="grid 2xl:grid-cols-4 gap-5">
-        <div className={`2xl:col-span-3 grid ${grid} gap-4 content-start`}>
+      <div className="grid grid-cols-1 2xl:grid-cols-4 gap-5">
+        <div className={`min-w-0 2xl:col-span-3 grid ${grid} gap-4 content-start`}>
           {list.map((c) => <CameraTile key={`${c.id}-${c.status === "ONLINE"}`} cam={c} onExpand={setExpanded} />)}
           {list.length === 0 && <p className="text-slate-500 text-sm">No cameras. Add one in Camera Management.</p>}
         </div>

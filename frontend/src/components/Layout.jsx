@@ -89,19 +89,19 @@ export default function Layout() {
           ))}
         </nav>
         <div className="p-3 border-t border-white/10">
-          <div className="flex items-center gap-3 px-2 py-2">
-            <div className="w-9 h-9 rounded-full bg-navy-700 text-white flex items-center justify-center font-semibold uppercase">{user.username[0]}</div>
+          <div className="flex items-center gap-2 px-1 py-2">
+            <div className="w-9 h-9 shrink-0 rounded-full bg-navy-700 text-white flex items-center justify-center font-semibold uppercase">{user.username[0]}</div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-white truncate">{user.full_name || user.username}</p>
-              <p className="text-[11px] text-slate-400 flex items-center gap-1">
-                <ShieldCheck size={11} />
-                {ROLES[user.role]}
+              <p className="text-sm font-medium text-white truncate" title={user.full_name || user.username}>{user.full_name || user.username}</p>
+              <p className="text-[11px] text-slate-400 flex items-center gap-1 whitespace-nowrap">
+                <ShieldCheck size={11} className="shrink-0" />
+                <span className="truncate">{ROLES[user.role]}</span>
               </p>
             </div>
-            <button type="button" onClick={() => setPwOpen(true)} className="p-2 rounded-lg hover:bg-white/10" title="Change my password" aria-label="Change my password">
+            <button type="button" onClick={() => setPwOpen(true)} className="p-1.5 shrink-0 rounded-lg hover:bg-white/10" title="Change my password" aria-label="Change my password">
               <KeyRound size={16} />
             </button>
-            <button type="button" onClick={() => logout().then(() => nav("/login"))} className="p-2 rounded-lg hover:bg-white/10" title="Sign out" aria-label="Sign out">
+            <button type="button" onClick={() => logout().then(() => nav("/login"))} className="p-1.5 shrink-0 rounded-lg hover:bg-white/10" title="Sign out" aria-label="Sign out">
               <LogOut size={16} />
             </button>
           </div>

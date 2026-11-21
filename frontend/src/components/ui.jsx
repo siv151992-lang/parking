@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Info, Loader2, X, XCircle } from "lucide-react";
 
 // Chart palette: validated reference categorical slots 1-3 (fixed order).
@@ -143,26 +143,65 @@ export function Select({ options, ...props }) {
   );
 }
 
+// Last focused element outside any dialog: where focus goes back when a dialog closes.
+let lastFocusOutside = null;
+if (typeof document !== "undefined") {
+  document.addEventListener("focusin", (e) => {
+    if (!e.target.closest?.("[role=dialog]")) lastFocusOutside = e.target;
+  });
+}
+
+const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+/** Accessible dialog: focus moves in and is kept inside (Tab / Shift+Tab), Escape closes,
+ * focus returns to the opening button, and the page behind does not scroll. */
 export function Modal({ open, onClose, title, children, footer, wide }) {
+  const box = useRef(null);
+  const closeRef = useRef(onClose);
+  const titleId = useId();
+  useLayoutEffect(() => {
+    closeRef.current = onClose;
+  });
   useEffect(() => {
     if (!open) return undefined;
-    const h = (e) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", h);
-    return () => window.removeEventListener("keydown", h);
-  }, [open, onClose]);
+    const opener = lastFocusOutside;
+    const el = box.current;
+    // a field with autoFocus is already focused by React; otherwise focus the first control
+    if (el && !el.contains(document.activeElement)) (el.querySelector(FOCUSABLE) || el).focus();
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => {
+      if (e.key === "Escape") return closeRef.current();
+      if (e.key !== "Tab" || !el) return undefined;
+      const items = [...el.querySelectorAll(FOCUSABLE)].filter((n) => n.offsetParent !== null);
+      if (!items.length) return e.preventDefault();
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      return undefined;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+      if (opener && typeof opener.focus === "function") opener.focus();
+    };
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="absolute inset-0 bg-navy-950/60" onClick={onClose} />
-      <div className={`relative bg-white w-full ${wide ? "sm:max-w-4xl" : "sm:max-w-lg"} rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92vh] flex flex-col`}>
+      <div className="absolute inset-0 bg-navy-950/60" onClick={onClose} aria-hidden="true" />
+      <div ref={box} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}
+        className={`relative bg-white w-full ${wide ? "sm:max-w-4xl" : "sm:max-w-lg"} rounded-t-2xl sm:rounded-2xl shadow-xl max-h-[92vh] flex flex-col outline-none`}>
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100">
-          <h3 className="font-semibold text-navy-900">{title}</h3>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-100 text-slate-500" aria-label="Close">
+          <h3 id={titleId} className="font-semibold text-navy-900">{title}</h3>
+          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-slate-100 text-slate-500" aria-label="Close">
             <X size={18} />
           </button>
         </div>
         <div className="px-5 py-4 overflow-y-auto">{children}</div>
-        {footer && <div className="px-5 py-3 border-t border-slate-100 flex justify-end gap-2">{footer}</div>}
+        {footer && <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap justify-end gap-2">{footer}</div>}
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ from collections import defaultdict, deque
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -51,7 +52,8 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     ip = client_ip(request)
     if _ip_blocked(ip):
         raise HTTPException(429, "Too many failed logins from this address. Try again in 15 minutes.")
-    user = db.query(User).filter(User.username == body.username.strip()).first()
+    # usernames are often email addresses: match them without regard to letter case
+    user = db.query(User).filter(func.lower(User.username) == body.username.strip().lower()).first()
     if user and user.locked_until and ensure_aware(user.locked_until) > utcnow():
         raise HTTPException(423, "Account temporarily locked after repeated failed logins. Try again later.")
     # always one bcrypt check, so the response time does not reveal whether the username exists

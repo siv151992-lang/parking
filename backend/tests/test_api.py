@@ -158,3 +158,12 @@ def test_input_limits(client):
     assert client.post("/api/entries/manual", json={"plate_number": "MH12AB1234", "timestamp": future}, headers=h).status_code == 422
     assert client.post("/api/vehicles", json={"plate_number": "MH12AB1234", "owner_name": "x" * 500}, headers=h).status_code == 422
     assert client.get("/api/dashboard/recent-detections?limit=-5", headers=h).status_code == 422
+
+
+def test_username_case_insensitive(client):
+    h = login(client)
+    body = {"email": "Case@Example.com", "password": "Str0ng!Passw0rd", "role": "REPORT_VIEWER"}
+    assert client.post("/api/users", json={**body, "username": "Mixed.Case@Site.com"}, headers=h).status_code == 201
+    assert client.post("/api/auth/login", json={"username": "mixed.case@site.com", "password": "Str0ng!Passw0rd"}).status_code == 200
+    r = client.post("/api/users", json={**body, "email": "other@example.com", "username": "MIXED.CASE@SITE.COM"}, headers=h)
+    assert r.status_code == 409

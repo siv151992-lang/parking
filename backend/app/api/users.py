@@ -50,7 +50,8 @@ def create_user(body: UserCreate, request: Request, db: Session = Depends(get_db
         raise HTTPException(400, str(e))
     if body.role == Role.SUPER_ADMIN and user.id != owner_id(db):
         raise HTTPException(403, "Only the owner account can create Super Admins")
-    if db.query(User).filter(or_(User.username == body.username, User.email == body.email)).first():
+    if db.query(User).filter(or_(func.lower(User.username) == body.username.lower(),
+                                 func.lower(User.email) == body.email.lower())).first():
         raise HTTPException(409, "Username or email already exists")
     u = User(username=body.username, email=body.email, full_name=body.full_name, role=body.role,
              is_active=body.is_active, hashed_password=hash_password(body.password))

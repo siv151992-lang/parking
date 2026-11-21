@@ -16,3 +16,5 @@ frontend/.env
 .idea/
 .env.old
 backend/.secret_key
+e2e/shots/
+e2e/issues.txt
