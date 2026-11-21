@@ -14,7 +14,7 @@ from .anpr.manager import camera_manager
 from .api import admin, alerts, auth, cameras, cameras_bulk, dashboard, detections, occupancy, reports, rows, transactions, users, vehicles
 from .config import BASE_DIR, settings
 from .database import SessionLocal, engine
-from .models import Alert, AlertType, DetectionStatus, ParkingSession, Role, SessionStatus, Severity, User, VehicleDetection
+from .models import Alert, AlertType, ParkingSession, Role, SessionStatus, Severity, User, VehicleDetection
 from .security import hash_password
 from .services import events, settings_store
 from .services.alerts import create_alert
@@ -65,6 +65,38 @@ def bootstrap():
         db.close()
 
 
+def purge_old_detections(db, retention_days: int, batch: int = 2000, budget_seconds: float = 30.0) -> int:
+    """Delete raw detections older than the retention period (transactions and sessions are kept),
+    with their image files, except images that are a parking session's entry / exit evidence."""
+    import time
+
+    from sqlalchemy import or_
+
+    cutoff = utcnow() - timedelta(days=retention_days)
+    deadline = time.monotonic() + budget_seconds
+    removed = 0
+    while time.monotonic() < deadline:
+        old = db.query(VehicleDetection).filter(VehicleDetection.detected_at < cutoff).order_by(VehicleDetection.id).limit(batch).all()
+        if not old:
+            break
+        paths = {p for d in old for p in (d.vehicle_image_path, d.plate_image_path) if p}
+        keep = set()
+        if paths:
+            cols = (ParkingSession.entry_vehicle_image, ParkingSession.entry_plate_image,
+                    ParkingSession.exit_vehicle_image, ParkingSession.exit_plate_image)
+            for row in db.query(*cols).filter(or_(*(c.in_(paths) for c in cols))):
+                keep.update(p for p in row if p)
+        for d in old:
+            db.delete(d)
+        db.commit()
+        for p in paths - keep:
+            (Path(settings.MEDIA_DIR) / p).unlink(missing_ok=True)
+        removed += len(old)
+    if removed:
+        log.info("Retention: removed %d detections older than %d days", removed, retention_days)
+    return removed
+
+
 def maintenance_tick(state: dict):
     """Runs every minute: reconciliation, overstay detection, retention."""
     db = SessionLocal()
@@ -88,14 +120,7 @@ def maintenance_tick(state: dict):
                                  session_id=s.id, plate_number=s.plate_number, is_simulated=s.is_simulated,
                                  data={"reason": "overstay"})
         if utcnow() - state.get("last_purge", utcnow() - timedelta(days=2)) > timedelta(hours=24):
-            cutoff = utcnow() - timedelta(days=int(cfg["detection_retention_days"]))
-            old = db.query(VehicleDetection).filter(VehicleDetection.detected_at < cutoff,
-                                                    VehicleDetection.status.in_([DetectionStatus.COOLDOWN, DetectionStatus.DUPLICATE]))
-            for d in old.limit(5000).all():
-                for p in (d.vehicle_image_path, d.plate_image_path):
-                    if p:
-                        (Path(settings.MEDIA_DIR) / p).unlink(missing_ok=True)
-                db.delete(d)
+            purge_old_detections(db, int(cfg["detection_retention_days"]))
             state["last_purge"] = utcnow()
         db.commit()
     except Exception:

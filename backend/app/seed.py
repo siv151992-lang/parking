@@ -117,7 +117,7 @@ def fill_rows(db, rows: dict, rng: random.Random):
     plates = [p for (p,) in parked]
     rng.shuffle(plates)
     now = datetime.now(timezone.utc)
-    for name, (cam_id, capacity) in rows.items():
+    for cam_id, capacity in rows.values():
         n = min(len(plates), int(capacity * rng.uniform(0.55, 0.8)))
         for plate in plates[:n]:
             process_detection(db, cam_id, DetectionEvent(plate_text=plate, plate_confidence=0.95, is_simulated=True,

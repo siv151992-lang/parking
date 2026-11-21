@@ -45,16 +45,25 @@ class ConnectionManager:
         return len(self._clients)
 
     async def _send_all(self, message: str):
+        """Send to every client at once; a client that cannot take the message within
+        5 s (stalled connection) is dropped instead of delaying everyone else."""
         with self._lock:
             clients = list(self._clients)
-        dead = []
-        for ws in clients:
+
+        async def send(ws):
             try:
-                await ws.send_text(message)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self.disconnect(ws)
+                await asyncio.wait_for(ws.send_text(message), timeout=5)
+                return None
+            except Exception:  # noqa: BLE001 - any failure means the connection is gone
+                return ws
+
+        for ws in await asyncio.gather(*(send(ws) for ws in clients)):
+            if ws is not None:
+                self.disconnect(ws)
+                try:
+                    await ws.close()
+                except Exception:  # noqa: BLE001, S110 - the connection is already broken
+                    pass
 
     def broadcast(self, event_type: str, data: dict):
         """Thread-safe broadcast; callable from any thread."""

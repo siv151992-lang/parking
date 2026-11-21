@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     text,
 )
+from sqlalchemy.types import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +29,25 @@ JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class UTCDateTime(TypeDecorator):
+    """Timestamp stored in UTC and always returned timezone-aware.
+    PostgreSQL does this natively; SQLite returns naive values, which would be
+    misread as server-local time when converted to the facility time zone."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None and value.tzinfo is not None:
+            value = value.astimezone(timezone.utc)
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
 
 
 # ---- Enumerations (stored as strings for portable, migration-friendly schema) ----
@@ -154,9 +174,9 @@ class Severity:
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+        UTCDateTime(), default=utcnow, onupdate=utcnow, nullable=False
     )
 
 
@@ -172,12 +192,12 @@ class User(TimestampMixin, Base):
     role: Mapped[str] = mapped_column(String(32), nullable=False, default=Role.REPORT_VIEWER)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     # True for the initial admin with the default password, until it is changed
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
     # tokens issued before this moment are rejected (set on password change / reset)
-    tokens_valid_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    tokens_valid_after: Mapped[datetime | None] = mapped_column(UTCDateTime())
 
 
 # ---------------------------------------------------------------- cameras
@@ -206,8 +226,8 @@ class Camera(TimestampMixin, Base):
     row_id: Mapped[int | None] = mapped_column(ForeignKey("parking_rows.id", ondelete="SET NULL"), index=True)
 
     status: Mapped[str] = mapped_column(String(16), default=CameraStatus.OFFLINE, nullable=False)
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_detection_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_detection_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     last_error: Mapped[str | None] = mapped_column(Text)
 
 
@@ -222,8 +242,8 @@ class Vehicle(TimestampMixin, Base):
     is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     owner_name: Mapped[str] = mapped_column(String(128), default="", nullable=False)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    first_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     total_visits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
@@ -256,9 +276,9 @@ class VehicleDetection(Base):
     needs_review: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     corrected_plate: Mapped[str | None] = mapped_column(String(20))
     reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    detected_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
 
     camera = relationship("Camera", lazy="selectin")
 
@@ -287,8 +307,8 @@ class ParkingSession(TimestampMixin, Base):
     vehicle_type: Mapped[str] = mapped_column(String(16), nullable=False)
     category: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(12), default=SessionStatus.ACTIVE, nullable=False)
-    entry_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    exit_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    entry_time: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    exit_time: Mapped[datetime | None] = mapped_column(UTCDateTime())
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     entry_camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id", ondelete="SET NULL"))
     exit_camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id", ondelete="SET NULL"))
@@ -319,12 +339,12 @@ class EntryTransaction(Base):
     vehicle_type: Mapped[str] = mapped_column(String(16), nullable=False)
     category: Mapped[str] = mapped_column(String(16), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     source: Mapped[str] = mapped_column(String(12), nullable=False)
     status: Mapped[str] = mapped_column(String(12), default=EntryStatus.VALID, nullable=False)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
 
     camera = relationship("Camera", lazy="selectin")
 
@@ -341,12 +361,12 @@ class ExitTransaction(Base):
     plate_number: Mapped[str | None] = mapped_column(String(20), index=True)
     vehicle_type: Mapped[str] = mapped_column(String(16), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
     source: Mapped[str] = mapped_column(String(12), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
 
     camera = relationship("Camera", lazy="selectin")
 
@@ -399,8 +419,8 @@ class RowPresence(Base):
     vehicle_type: Mapped[str] = mapped_column(String(16), default=VehicleType.CAR, nullable=False)
     session_id: Mapped[int | None] = mapped_column(ForeignKey("parking_sessions.id", ondelete="SET NULL"), index=True)
     status: Mapped[str] = mapped_column(String(8), default=PresenceStatus.ACTIVE, nullable=False)
-    entered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    exited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    entered_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    exited_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     close_reason: Mapped[str | None] = mapped_column(String(12))
     entry_camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id", ondelete="SET NULL"))
     exit_camera_id: Mapped[int | None] = mapped_column(ForeignKey("cameras.id", ondelete="SET NULL"))
@@ -430,8 +450,8 @@ class Alert(Base):
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_resolved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     resolved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
 
 
 # ------------------------------------------------------------- audit_logs
@@ -450,7 +470,7 @@ class AuditLog(Base):
     entity_id: Mapped[str | None] = mapped_column(String(64))
     details: Mapped[dict | None] = mapped_column(JSONType)
     ip_address: Mapped[str | None] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, nullable=False)
 
 
 # -------------------------------------------------------- system_settings
@@ -459,4 +479,4 @@ class SystemSetting(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSONType)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, onupdate=utcnow, nullable=False)

@@ -1,6 +1,6 @@
 from collections import Counter
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -87,9 +87,9 @@ def hourly_today(db: Session = Depends(get_db), _=Depends(require("dashboard.vie
 
 
 @router.get("/recent-detections")
-def recent_detections(limit: int = 20, db: Session = Depends(get_db), _=Depends(require("dashboard.view"))):
+def recent_detections(limit: int = Query(20, ge=1, le=100), db: Session = Depends(get_db), _=Depends(require("dashboard.view"))):
     rows = (db.query(VehicleDetection).filter(VehicleDetection.status != DetectionStatus.COOLDOWN)
-            .order_by(VehicleDetection.detected_at.desc()).limit(min(limit, 100)).all())
+            .order_by(VehicleDetection.detected_at.desc()).limit(limit).all())
     return [detection_out(d) for d in rows]
 
 

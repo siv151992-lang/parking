@@ -195,7 +195,7 @@ def test_manual_entry_duplicate_rejected(db, cameras, admin):
     counting.manual_entry(db, admin, "KA05MN7777", "CAR", None)
     try:
         counting.manual_entry(db, admin, "KA05MN7777", "CAR", None)
-        assert False, "expected CountingError"
+        raise AssertionError("expected CountingError")
     except counting.CountingError as e:
         assert e.status_code == 409
 
@@ -256,3 +256,27 @@ def test_reconciliation_after_mixed_traffic(db, cameras, admin):
     rec = reconcile(db)
     assert rec["is_consistent"], rec
     assert inside(db) >= 0
+
+
+def test_retention_purges_old_detections_but_keeps_session_images(db, cameras, tmp_path, monkeypatch):
+    from app.config import settings
+    from app.main import purge_old_detections
+    from app.models import VehicleDetection
+
+    monkeypatch.setattr(settings, "MEDIA_DIR", tmp_path)
+    old = utcnow() - timedelta(days=100)
+    r = process_detection(db, cameras["entry"], ev("MH12AB1234", t=old))          # creates a session with images
+    process_detection(db, cameras["entry"], ev("MH12AB1234", t=old + timedelta(minutes=5)))  # duplicate
+    process_detection(db, cameras["entry"], ev("KA01AA0001"))                        # recent, kept
+    for d in db.query(VehicleDetection).all():                                       # give every detection image files
+        d.vehicle_image_path, d.plate_image_path = f"v{d.id}.jpg", f"p{d.id}.jpg"
+        (tmp_path / f"v{d.id}.jpg").write_bytes(b"x")
+        (tmp_path / f"p{d.id}.jpg").write_bytes(b"x")
+    s = db.get(ParkingSession, r["session_id"])
+    s.entry_vehicle_image = f"v{r['detection_id']}.jpg"                              # session evidence
+    db.commit()
+    assert purge_old_detections(db, 90) == 2
+    assert db.query(VehicleDetection).count() == 1
+    assert (tmp_path / f"v{r['detection_id']}.jpg").exists()                         # kept: used by the session
+    assert not (tmp_path / f"p{r['detection_id']}.jpg").exists()
+    assert db.get(ParkingSession, r["session_id"]).status == SessionStatus.ACTIVE      # counts untouched

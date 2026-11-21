@@ -149,3 +149,12 @@ def test_username_allows_anything_but_spaces(client):
     r = client.post("/api/users", json={**body, "email": "d2@example.com", "username": "deepak k"}, headers=h)
     assert r.status_code == 422 and "cannot contain spaces" in r.text
     assert client.post("/api/auth/login", json={"username": "deepak.k@zohocorphelpdesk.com", "password": "Str0ng!Passw0rd"}).status_code == 200
+
+
+def test_input_limits(client):
+    h = login(client)
+    from datetime import datetime, timedelta, timezone
+    future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    assert client.post("/api/entries/manual", json={"plate_number": "MH12AB1234", "timestamp": future}, headers=h).status_code == 422
+    assert client.post("/api/vehicles", json={"plate_number": "MH12AB1234", "owner_name": "x" * 500}, headers=h).status_code == 422
+    assert client.get("/api/dashboard/recent-detections?limit=-5", headers=h).status_code == 422

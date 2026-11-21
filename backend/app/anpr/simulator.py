@@ -15,6 +15,7 @@ All results produced here are flagged is_simulated=True end to end.
 """
 from __future__ import annotations
 
+import logging
 import random
 import threading
 import time
@@ -27,6 +28,7 @@ from ..models import Camera, Direction, ParkingRow, ParkingSession, PresenceStat
 from .sources import SourceError
 from .tracker import Detection
 
+log = logging.getLogger("anpr.simulator")
 W, H = 960, 540
 STATES = ["MH", "DL", "KA", "TN", "GJ", "RJ", "UP", "WB", "TS", "KL", "HR", "PB", "AP", "MP"]
 CONFUSE = {"0": "O", "O": "0", "8": "B", "B": "8", "1": "I", "I": "1", "5": "S", "S": "5", "2": "Z", "6": "G"}
@@ -149,8 +151,8 @@ class SimulatedSource:
                 if rows:
                     plate, vtype = self.rng.choice(rows[: max(5, len(rows) // 2)])  # favour older sessions
                     return plate, vtype
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 - DB busy: fall back to a new random vehicle
+                log.debug("could not pick a parked vehicle", exc_info=True)
             if self.rng.random() < 0.85:
                 return "", ""  # nothing parked: skip this spawn
         r = self.rng.random()

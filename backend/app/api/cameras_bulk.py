@@ -167,7 +167,7 @@ def bulk_cameras(body: BulkIn, request: Request, db: Session = Depends(get_db), 
         todo = [r for r in lines if not r["errors"] and r["rtsp_url"]]
         with ThreadPoolExecutor(max_workers=16) as pool:
             results = list(pool.map(lambda r: check_connection(r["rtsp_url"], r["username"], r["password"]), todo))
-        for r, res in zip(todo, results):
+        for r, res in zip(todo, results, strict=True):
             r.update(connection=res["connection"], message=res["message"], rtsp_url=res["rtsp_url"])
             if res["connection"] != "ok":
                 r["warnings"].append(res["message"])

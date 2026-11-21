@@ -60,9 +60,12 @@ class CameraManager:
             self.start(camera_id)
 
     def stop_all(self):
-        for cid in list(self.workers):
-            self.stop(cid, join=False)
-        for w in list(self.workers.values()):
+        with self._lock:
+            workers = list(self.workers.values())
+            self.workers.clear()
+        for w in workers:
+            w.stop()
+        for w in workers:  # then wait for all of them (they stop in parallel)
             w.join(timeout=3)
 
     def get(self, camera_id: int) -> CameraWorker | None:

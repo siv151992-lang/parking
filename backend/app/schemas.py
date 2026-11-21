@@ -1,5 +1,5 @@
 """Pydantic request schemas (validated input for the REST API)."""
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
@@ -10,13 +10,13 @@ VehicleTypeT = Literal["CAR", "TWO_WHEELER", "COMMERCIAL"]
 
 
 class LoginIn(BaseModel):
-    username: str
-    password: str
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=256)
 
 
 class ChangePasswordIn(BaseModel):
-    current_password: str
-    new_password: str
+    current_password: str = Field(max_length=256)
+    new_password: str = Field(max_length=256)
 
 
 class UserCreate(BaseModel):
@@ -32,18 +32,18 @@ class UserCreate(BaseModel):
         if len(v) < 3:
             raise ValueError("Username must be at least 3 characters")
         return v
-    full_name: str = ""
-    password: str
+    full_name: str = Field("", max_length=128)
+    password: str = Field(max_length=256)
     role: RoleT = "REPORT_VIEWER"
     is_active: bool = True
 
 
 class UserUpdate(BaseModel):
     email: EmailStr | None = None
-    full_name: str | None = None
+    full_name: str | None = Field(None, max_length=128)
     role: RoleT | None = None
     is_active: bool | None = None
-    password: str | None = None
+    password: str | None = Field(None, max_length=256)
 
 
 class DetectionZone(BaseModel):
@@ -62,13 +62,13 @@ class DetectionZone(BaseModel):
 class CameraBase(BaseModel):
     camera_code: str = Field("", max_length=32)  # empty: generated (CAM-EN-01, CAM-A-EX-01, ...)
     name: str = Field(min_length=1, max_length=128)
-    ip_address: str = ""
+    ip_address: str = Field("", max_length=64)
     port: int = Field(554, ge=1, le=65535)
     onvif_port: int = Field(80, ge=1, le=65535)
-    rtsp_url: str = ""
-    username: str = ""
-    password: str | None = None
-    location: str = ""
+    rtsp_url: str = Field("", max_length=512)
+    username: str = Field("", max_length=128)
+    password: str | None = Field(None, max_length=256)
+    location: str = Field("", max_length=255)
     direction: DirectionT
     is_simulated: bool = False
     is_enabled: bool = True
@@ -84,15 +84,15 @@ class CameraCreate(CameraBase):
 
 
 class CameraUpdate(BaseModel):
-    camera_code: str | None = None
-    name: str | None = None
-    ip_address: str | None = None
+    camera_code: str | None = Field(None, max_length=32)
+    name: str | None = Field(None, max_length=128)
+    ip_address: str | None = Field(None, max_length=64)
     port: int | None = None
     onvif_port: int | None = None
-    rtsp_url: str | None = None
-    username: str | None = None
-    password: str | None = None
-    location: str | None = None
+    rtsp_url: str | None = Field(None, max_length=512)
+    username: str | None = Field(None, max_length=128)
+    password: str | None = Field(None, max_length=256)
+    location: str | None = Field(None, max_length=255)
     direction: DirectionT | None = None
     is_simulated: bool | None = None
     is_enabled: bool | None = None
@@ -104,32 +104,50 @@ class CameraUpdate(BaseModel):
 
 
 class OnvifProbeIn(BaseModel):
-    ip_address: str
+    ip_address: str = Field(max_length=64)
     onvif_port: int = 80
-    username: str = ""
-    password: str = ""
+    username: str = Field("", max_length=128)
+    password: str = Field("", max_length=256)
 
 
 class TestStreamIn(BaseModel):
-    rtsp_url: str
-    username: str = ""
-    password: str = ""
+    rtsp_url: str = Field(max_length=512)
+    username: str = Field("", max_length=128)
+    password: str = Field("", max_length=256)
     camera_id: int | None = None  # when editing: use the saved password if none is typed
 
 
+def _not_future(v: datetime | None) -> datetime | None:
+    if v is not None:
+        aware = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+        if aware > datetime.now(timezone.utc) + timedelta(minutes=5):
+            raise ValueError("Time cannot be in the future")
+    return v
+
+
 class ManualEntryIn(BaseModel):
-    plate_number: str
+    plate_number: str = Field(max_length=32)
     vehicle_type: VehicleTypeT = "CAR"
     timestamp: datetime | None = None
     camera_id: int | None = None
-    notes: str = ""
+    notes: str = Field("", max_length=2000)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _not_in_future(cls, v):
+        return _not_future(v)
 
 
 class ManualExitIn(BaseModel):
-    plate_number: str | None = None
+    plate_number: str | None = Field(None, max_length=32)
     session_id: int | None = None
     timestamp: datetime | None = None
-    notes: str = ""
+    notes: str = Field("", max_length=2000)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _not_in_future(cls, v):
+        return _not_future(v)
 
 
 class CancelIn(BaseModel):
@@ -141,11 +159,11 @@ class ResolveExitIn(BaseModel):
 
 
 class CorrectPlateIn(BaseModel):
-    plate_number: str
+    plate_number: str = Field(max_length=32)
 
 
 class ReviewIn(BaseModel):
-    corrected_plate: str | None = None
+    corrected_plate: str | None = Field(None, max_length=32)
     vehicle_type: VehicleTypeT | None = None
 
 
@@ -153,30 +171,30 @@ class VehicleUpdate(BaseModel):
     vehicle_type: VehicleTypeT | None = None
     is_reserved: bool | None = None
     is_blacklisted: bool | None = None
-    owner_name: str | None = None
-    notes: str | None = None
+    owner_name: str | None = Field(None, max_length=128)
+    notes: str | None = Field(None, max_length=2000)
 
 
 class VehicleCreate(BaseModel):
-    plate_number: str
+    plate_number: str = Field(max_length=32)
     vehicle_type: VehicleTypeT = "CAR"
     is_reserved: bool = False
     is_blacklisted: bool = False
-    owner_name: str = ""
-    notes: str = ""
+    owner_name: str = Field("", max_length=128)
+    notes: str = Field("", max_length=2000)
 
 
 class CapacityUpdate(BaseModel):
     total_capacity: int | None = Field(None, ge=0, le=100000)
     alert_threshold_pct: int | None = Field(None, ge=1, le=100)
-    label: str | None = None
+    label: str | None = Field(None, max_length=64)
     is_active: bool | None = None
 
 
 class SimulateDetectionIn(BaseModel):
     """Inject a single detection into a camera's pipeline (testing tool)."""
     camera_id: int
-    plate_number: str | None = None
+    plate_number: str | None = Field(None, max_length=32)
     plate_confidence: float = Field(0.92, ge=0, le=1)
     vehicle_type: VehicleTypeT = "CAR"
 
