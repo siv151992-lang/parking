@@ -7,7 +7,7 @@ import jwt
 from .config import settings
 from .models import Role
 
-SA, PM, SO, RV = Role.SUPER_ADMIN, Role.PARKING_MANAGER, Role.SECURITY_OPERATOR, Role.REPORT_VIEWER
+SA, PM, SO, RV, EM = Role.SUPER_ADMIN, Role.PARKING_MANAGER, Role.SECURITY_OPERATOR, Role.REPORT_VIEWER, Role.EMPLOYEE
 
 # permission -> roles that hold it
 PERMISSIONS: dict[str, set[str]] = {
@@ -28,6 +28,12 @@ PERMISSIONS: dict[str, set[str]] = {
     "settings.view": {SA, PM},
     "settings.manage": {SA},
     "audit.view": {SA, PM},
+    # office parking reservations
+    "offices.view": {SA, PM, SO, RV, EM},
+    "offices.manage": {SA, PM},
+    "bookings.own": {SA, PM, SO, RV, EM},     # book a slot for yourself or a visitor
+    "bookings.verify": {SA, PM, SO},          # security: look up, check in / check out
+    "bookings.manage": {SA, PM},              # see and cancel everyone's bookings, book for others
 }
 
 

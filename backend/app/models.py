@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     text,
+    UniqueConstraint,
 )
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.dialects.postgresql import JSONB
@@ -56,7 +57,9 @@ class Role:
     PARKING_MANAGER = "PARKING_MANAGER"
     SECURITY_OPERATOR = "SECURITY_OPERATOR"
     REPORT_VIEWER = "REPORT_VIEWER"
-    ALL = [SUPER_ADMIN, PARKING_MANAGER, SECURITY_OPERATOR, REPORT_VIEWER]
+    EMPLOYEE = "EMPLOYEE"  # books office parking for themselves / visitors; no console access
+    STAFF = [SUPER_ADMIN, PARKING_MANAGER, SECURITY_OPERATOR, REPORT_VIEWER]
+    ALL = [*STAFF, EMPLOYEE]
 
 
 class Direction:
@@ -167,6 +170,20 @@ class AlertType:
     COUNT_MISMATCH = "COUNT_MISMATCH"
 
 
+class SlotStatus:
+    ACTIVE = "ACTIVE"
+    OUT_OF_SERVICE = "OUT_OF_SERVICE"
+
+
+class BookingStatus:
+    CONFIRMED = "CONFIRMED"      # reserved, not arrived yet
+    CHECKED_IN = "CHECKED_IN"    # vehicle is in the slot
+    COMPLETED = "COMPLETED"      # checked out
+    CANCELLED = "CANCELLED"
+    NO_SHOW = "NO_SHOW"          # not checked in in time: slot released
+    HOLDING = (CONFIRMED, CHECKED_IN)  # statuses that occupy the slot
+
+
 class Severity:
     INFO = "INFO"
     WARNING = "WARNING"
@@ -194,6 +211,8 @@ class User(TimestampMixin, Base):
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime())
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    phone: Mapped[str] = mapped_column(String(32), default="", server_default="", nullable=False)
+    department: Mapped[str] = mapped_column(String(64), default="", server_default="", nullable=False)
     # True for the initial admin with the default password, until it is changed
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"), nullable=False)
     # tokens issued before this moment are rejected (set on password change / reset)
@@ -245,6 +264,8 @@ class Vehicle(TimestampMixin, Base):
     first_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
     total_visits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # employee who registered this vehicle (office parking); ANPR-only vehicles have none
+    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
 
 
 # ----------------------------------------------------- vehicle_detections
@@ -428,6 +449,112 @@ class RowPresence(Base):
     is_simulated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
+# ------------------------------------------------- office parking: places
+class Office(TimestampMixin, Base):
+    """An office building / campus with its own parking."""
+    __tablename__ = "offices"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    city: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    address: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
+    is_24h: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    open_time: Mapped[str] = mapped_column(String(5), default="07:00", nullable=False)   # HH:MM, office time zone
+    close_time: Mapped[str] = mapped_column(String(5), default="22:00", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+    floors = relationship("OfficeFloor", back_populates="office", cascade="all, delete-orphan", lazy="selectin",
+                          order_by="OfficeFloor.level")
+
+
+class OfficeFloor(Base):
+    __tablename__ = "office_floors"
+    __table_args__ = (UniqueConstraint("office_id", "name", name="uq_floor_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    office_id: Mapped[int] = mapped_column(ForeignKey("offices.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    level: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    office = relationship("Office", back_populates="floors")
+    zones = relationship("OfficeZone", back_populates="floor", cascade="all, delete-orphan", lazy="selectin",
+                         order_by="OfficeZone.name")
+
+
+class OfficeZone(Base):
+    __tablename__ = "office_zones"
+    __table_args__ = (UniqueConstraint("floor_id", "name", name="uq_zone_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    floor_id: Mapped[int] = mapped_column(ForeignKey("office_floors.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    floor = relationship("OfficeFloor", back_populates="zones")
+
+
+class ParkingSlot(TimestampMixin, Base):
+    __tablename__ = "parking_slots"
+    __table_args__ = (UniqueConstraint("office_id", "code", name="uq_slot_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    office_id: Mapped[int] = mapped_column(ForeignKey("offices.id", ondelete="CASCADE"), nullable=False, index=True)
+    zone_id: Mapped[int] = mapped_column(ForeignKey("office_zones.id", ondelete="CASCADE"), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(32), nullable=False)
+    vehicle_type: Mapped[str] = mapped_column(String(16), default=VehicleType.CAR, nullable=False)
+    is_ev: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)           # EV charger at the slot
+    is_accessible: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)   # wheelchair-accessible
+    is_visitor: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)      # only for visitor bookings
+    # permanently assigned to one employee: nobody else can book it
+    assigned_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default=SlotStatus.ACTIVE, nullable=False)
+
+    zone = relationship("OfficeZone", lazy="selectin")
+    assigned_user = relationship("User", lazy="selectin")
+
+
+# --------------------------------------------- office parking: reservations
+class SlotBooking(TimestampMixin, Base):
+    """A reservation of one slot for a time window (an employee, or a visitor booked by an employee).
+    PostgreSQL additionally enforces "no two holding bookings overlap on a slot" with an
+    exclusion constraint (migration 0004)."""
+    __tablename__ = "slot_bookings"
+    __table_args__ = (
+        Index("ix_booking_slot_time", "slot_id", "start_at", "end_at"),
+        Index("ix_booking_user_time", "user_id", "start_at"),
+        Index("ix_booking_office_time", "office_id", "start_at"),
+        Index("ix_booking_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(12), unique=True, nullable=False)
+    qr_token: Mapped[str] = mapped_column(String(64), nullable=False)  # secret part of the QR code
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    office_id: Mapped[int] = mapped_column(ForeignKey("offices.id", ondelete="CASCADE"), nullable=False)
+    slot_id: Mapped[int | None] = mapped_column(ForeignKey("parking_slots.id", ondelete="SET NULL"))
+    slot_code: Mapped[str] = mapped_column(String(32), nullable=False)  # kept if the slot is deleted later
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id", ondelete="SET NULL"))
+    plate_number: Mapped[str | None] = mapped_column(String(20), index=True)
+    vehicle_type: Mapped[str] = mapped_column(String(16), default=VehicleType.CAR, nullable=False)
+    visitor_name: Mapped[str | None] = mapped_column(String(128))
+    visitor_phone: Mapped[str | None] = mapped_column(String(32))
+    start_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    end_at: Mapped[datetime] = mapped_column(UTCDateTime(), nullable=False)
+    status: Mapped[str] = mapped_column(String(12), default=BookingStatus.CONFIRMED, nullable=False)
+    checked_in_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    checked_out_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    handled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))  # guard at check-in/out
+    cancelled_at: Mapped[datetime | None] = mapped_column(UTCDateTime())
+    cancel_reason: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    notes: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+
+    user = relationship("User", foreign_keys=[user_id], lazy="selectin")
+    office = relationship("Office", lazy="selectin")
+    slot = relationship("ParkingSlot", lazy="selectin")
+
+
 # ----------------------------------------------------------------- alerts
 class Alert(Base):
     __tablename__ = "alerts"
@@ -480,3 +607,16 @@ class SystemSetting(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSONType)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+# PostgreSQL: databases created from the models (tests, AUTO_MIGRATE on an empty SQLite is separate)
+# get the same "no overlapping bookings per slot" rule as migration 0004.
+from sqlalchemy import DDL, event  # noqa: E402
+
+event.listen(
+    SlotBooking.__table__, "after_create",
+    DDL("CREATE EXTENSION IF NOT EXISTS btree_gist; "
+        "ALTER TABLE slot_bookings ADD CONSTRAINT ex_booking_no_overlap EXCLUDE USING gist "
+        "(slot_id WITH =, tstzrange(start_at, end_at, '[)') WITH &&) "
+        "WHERE (status IN ('CONFIRMED', 'CHECKED_IN') AND slot_id IS NOT NULL)").execute_if(dialect="postgresql"),
+)

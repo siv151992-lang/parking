@@ -53,7 +53,7 @@ HOURLY = [1, 1, 1, 1, 1, 2, 4, 9, 14, 12, 9, 8, 9, 8, 7, 7, 8, 10, 12, 9, 6, 4, 
 
 
 def reset(db):
-    for t in ["row_presence", "alerts", "audit_logs", "entry_transactions", "exit_transactions", "parking_sessions", "vehicle_detections", "vehicles"]:
+    for t in ["slot_bookings", "row_presence", "alerts", "audit_logs", "entry_transactions", "exit_transactions", "parking_sessions", "vehicle_detections", "vehicles"]:
         db.execute(text(f"DELETE FROM {t}"))
     db.execute(text("UPDATE parking_capacity SET alert_state='NORMAL'"))
     db.execute(text("UPDATE parking_rows SET alert_state='NORMAL'"))
@@ -124,6 +124,76 @@ def fill_rows(db, rows: dict, rng: random.Random):
                                                          timestamp=now - timedelta(minutes=rng.randint(1, 120))))
         plates = plates[n:]
     print("Rows filled:", {k: v[1] for k, v in rows.items()})
+
+
+OFFICES = [
+    # name, city, address, lat, lng, floors: [(floor, level, [(zone, prefix, count, extra)])]
+    ("Head Office", "Bengaluru", "MG Road, Bengaluru", 12.9756, 77.6050, [
+        ("Basement 1", -1, [("A", "A-", 20, {}), ("B", "B-", 12, {"vehicle_type": "TWO_WHEELER"})]),
+        ("Ground", 0, [("Visitors", "V-", 6, {"is_visitor": True}), ("EV", "E-", 4, {"is_ev": True})]),
+    ]),
+    ("Tech Park", "Chennai", "OMR, Chennai", 12.9010, 80.2279, [
+        ("Level 1", 1, [("North", "N-", 15, {}), ("South", "S-", 10, {})]),
+    ]),
+]
+EMPLOYEES = [("asha", "Asha Menon", "Engineering", "KA01MJ4521"), ("vikram", "Vikram Rao", "Finance", "KA05NB7788"),
+             ("meera", "Meera Iyer", "HR", "TN09BX3310"), ("arjun", "Arjun Das", "Sales", "KA03HC9902")]
+EMPLOYEE_PASSWORD = "Employee@123"
+
+
+def seed_offices(db, rng: random.Random):
+    """Demo offices with floors, zones and slots, demo employees with vehicles, and a few bookings."""
+    from .models import BookingStatus, Office, OfficeFloor, OfficeZone, ParkingSlot, SlotBooking
+    from .services.bookings import new_code
+    import secrets
+    if db.query(Office).count():
+        return
+    for name, city, address, lat, lng, floors in OFFICES:
+        o = Office(name=name, city=city, address=address, latitude=lat, longitude=lng, open_time="07:00", close_time="22:00")
+        db.add(o)
+        db.flush()
+        for fname, level, zones in floors:
+            f = OfficeFloor(office_id=o.id, name=fname, level=level)
+            db.add(f)
+            db.flush()
+            for zname, prefix, count, extra in zones:
+                z = OfficeZone(floor_id=f.id, name=zname)
+                db.add(z)
+                db.flush()
+                for i in range(1, count + 1):
+                    db.add(ParkingSlot(office_id=o.id, zone_id=z.id, code=f"{prefix}{i:02d}",
+                                       is_accessible=(prefix == "A-" and i <= 2), **extra))
+    people = []
+    for username, full, dept, plate in EMPLOYEES:
+        u = db.query(User).filter(User.username == username).first()
+        if not u:
+            u = User(username=username, email=f"{username}@company.example", full_name=full, department=dept,
+                     role=Role.EMPLOYEE, hashed_password=hash_password(EMPLOYEE_PASSWORD))
+            db.add(u)
+            db.flush()
+        v = db.query(Vehicle).filter(Vehicle.plate_number == plate).first() or Vehicle(plate_number=plate, vehicle_type=VehicleType.CAR)
+        v.owner_user_id, v.owner_name = u.id, full
+        db.add(v)
+        db.flush()
+        people.append((u, v))
+    db.commit()
+    # a few bookings today and tomorrow (office hours, Head Office zone A)
+    hq = db.query(Office).filter(Office.name == "Head Office").first()
+    slots = db.query(ParkingSlot).filter(ParkingSlot.office_id == hq.id, ParkingSlot.code.like("A-%")).order_by(ParkingSlot.code).all()
+    tz = facility_tz(db)
+    today = datetime.now(tz).date()
+    for i, (u, v) in enumerate(people[:3]):
+        for day in (today, today + timedelta(days=1)):
+            start = datetime.combine(day, time(9, 0), tzinfo=tz)
+            end = datetime.combine(day, time(18, 0), tzinfo=tz)
+            db.add(SlotBooking(code=new_code(db), qr_token=secrets.token_urlsafe(18), user_id=u.id, office_id=hq.id,
+                               slot_id=slots[i + 3].id, slot_code=slots[i + 3].code, vehicle_id=v.id,
+                               plate_number=v.plate_number, vehicle_type=v.vehicle_type,
+                               start_at=start.astimezone(timezone.utc), end_at=end.astimezone(timezone.utc),
+                               status=BookingStatus.CONFIRMED))
+            db.flush()
+    db.commit()
+    print(f"Office parking: {len(OFFICES)} offices, {len(EMPLOYEES)} employees (password {EMPLOYEE_PASSWORD})")
 
 
 def seed_vehicles(db, rng):
@@ -218,12 +288,14 @@ def main():
         seed_users(db)
         cams = seed_cameras(db)
         rows = seed_rows(db)
+        seed_offices(db, random.Random(args.seed))
         settings_store.invalidate()
         if not args.no_history:
             rng = random.Random(args.seed)
             seed_history(db, cams, args.days, rng)
             fill_rows(db, rows, rng)
-        print("Sample data loaded. Logins: admin/Admin@123, manager/Manager@123, operator/Operator@123, viewer/Viewer@123")
+        print("Sample data loaded. Logins: admin/Admin@123, manager/Manager@123, operator/Operator@123, viewer/Viewer@123, "
+              f"employees asha / vikram / meera / arjun ({EMPLOYEE_PASSWORD})")
     finally:
         db.close()
 

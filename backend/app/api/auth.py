@@ -4,13 +4,14 @@ from collections import defaultdict, deque
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import client_ip, get_current_user
-from ..models import User
-from ..schemas import ChangePasswordIn, LoginIn
+from ..models import Role, User
+from ..schemas import ChangePasswordIn, LoginIn, RegisterIn
+from ..services import settings_store
 from ..security import DUMMY_HASH, create_access_token, hash_password, validate_password_strength, verify_password
 from ..serializers import user_out
 from ..services.audit import audit
@@ -77,6 +78,49 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     if body.password in DEFAULT_PASSWORDS:
         user.must_change_password = True
     audit(db, user, "LOGIN", "user", user.id, {}, ip)
+    db.commit()
+    return {"access_token": create_access_token(user.id, user.username, user.role), "token_type": "bearer",
+            "user": _user_payload(db, user)}
+
+
+def _signup_domains(db: Session) -> list[str]:
+    raw = settings_store.get(db, "employee_signup_domains") or ""
+    return [d.strip().lower().lstrip("@") for d in raw.split(",") if d.strip()]
+
+
+@router.get("/signup-info")
+def signup_info(db: Session = Depends(get_db)):
+    """Public: whether employees can create their own account, and with which email domains."""
+    domains = _signup_domains(db)
+    return {"enabled": bool(domains), "domains": domains}
+
+
+@router.post("/register", status_code=201)
+def register(body: RegisterIn, request: Request, db: Session = Depends(get_db)):
+    """Employee self-registration, only for email addresses of the allowed company domains.
+    The account is an EMPLOYEE (book parking only; no console access)."""
+    ip = client_ip(request)
+    if _ip_blocked(ip):
+        raise HTTPException(429, "Too many attempts from this address. Try again in 15 minutes.")
+    domains = _signup_domains(db)
+    email = body.email.strip().lower()
+    if not domains:
+        raise HTTPException(403, "Self-registration is switched off. Ask an administrator for an account.")
+    if email.rsplit("@", 1)[-1] not in domains:
+        _ip_failed(ip)
+        raise HTTPException(403, f"Use your company email address ({', '.join('@' + d for d in domains)})")
+    try:
+        validate_password_strength(body.password)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
+    if db.query(User).filter(or_(func.lower(User.username) == email, func.lower(User.email) == email)).first():
+        _ip_failed(ip)  # counts towards the per-address limit: stops probing for registered emails
+        raise HTTPException(409, "An account with this email already exists. Sign in or reset your password with an administrator.")
+    user = User(username=email, email=email, full_name=body.full_name.strip(), phone=body.phone.strip(),
+                department=body.department.strip(), role=Role.EMPLOYEE, hashed_password=hash_password(body.password))
+    db.add(user)
+    db.flush()
+    audit(db, user, "REGISTER", "user", user.id, {"email": email}, ip)
     db.commit()
     return {"access_token": create_access_token(user.id, user.username, user.role), "token_type": "bearer",
             "user": _user_payload(db, user)}

@@ -22,6 +22,8 @@ def user_out(u: User) -> dict:
         "username": u.username,
         "email": u.email,
         "full_name": u.full_name,
+        "phone": u.phone,
+        "department": u.department,
         "role": u.role,
         "is_active": u.is_active,
         "last_login_at": u.last_login_at,
@@ -71,6 +73,7 @@ def vehicle_out(v: Vehicle) -> dict:
         "first_seen_at": v.first_seen_at,
         "last_seen_at": v.last_seen_at,
         "total_visits": v.total_visits,
+        "owner_user_id": v.owner_user_id,
     }
 
 
@@ -159,3 +162,49 @@ def exit_out(t: ExitTransaction) -> dict:
         "status": t.status,
         "notes": t.notes,
     }
+
+
+# ------------------------------------------------------- office parking
+def office_out(o) -> dict:
+    return {
+        "id": o.id, "name": o.name, "city": o.city, "address": o.address,
+        "latitude": o.latitude, "longitude": o.longitude, "is_24h": o.is_24h,
+        "open_time": o.open_time, "close_time": o.close_time, "is_active": o.is_active, "notes": o.notes,
+        "floors": [{"id": f.id, "name": f.name, "level": f.level,
+                    "zones": [{"id": z.id, "name": z.name} for z in f.zones]} for f in o.floors],
+    }
+
+
+def slot_out(s, state: str | None = None) -> dict:
+    zone = s.zone
+    return {
+        "id": s.id, "office_id": s.office_id, "zone_id": s.zone_id, "code": s.code,
+        "zone": zone.name if zone else None, "floor": zone.floor.name if zone else None,
+        "floor_level": zone.floor.level if zone else None,
+        "vehicle_type": s.vehicle_type, "is_ev": s.is_ev, "is_accessible": s.is_accessible,
+        "is_visitor": s.is_visitor, "status": s.status, "assigned_user_id": s.assigned_user_id,
+        "assigned_to": (s.assigned_user.full_name or s.assigned_user.username) if s.assigned_user else None,
+        **({"state": state} if state else {}),
+    }
+
+
+def booking_out(b, include_qr: bool = False) -> dict:
+    from .services.bookings import qr_payload
+
+    slot = b.slot
+    out = {
+        "id": b.id, "code": b.code, "status": b.status,
+        "office_id": b.office_id, "office_name": b.office.name if b.office else None,
+        "slot_id": b.slot_id, "slot_code": b.slot_code,
+        "floor": slot.zone.floor.name if slot and slot.zone else None, "zone": slot.zone.name if slot and slot.zone else None,
+        "user_id": b.user_id, "user_name": (b.user.full_name or b.user.username) if b.user else None,
+        "plate_number": b.plate_number, "vehicle_type": b.vehicle_type,
+        "visitor_name": b.visitor_name, "visitor_phone": b.visitor_phone,
+        "start_at": b.start_at, "end_at": b.end_at,
+        "checked_in_at": b.checked_in_at, "checked_out_at": b.checked_out_at,
+        "cancelled_at": b.cancelled_at, "cancel_reason": b.cancel_reason, "notes": b.notes,
+        "created_at": b.created_at,
+    }
+    if include_qr:  # only for the booking's owner / staff: the token proves the QR is genuine
+        out["qr"] = qr_payload(b)
+    return out

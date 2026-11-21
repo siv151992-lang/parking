@@ -27,6 +27,15 @@ DEFAULTS: dict = {
     "capacity_alerts_enabled": True,
     # retention
     "detection_retention_days": 90,
+    # office parking reservations
+    "booking_max_days_ahead": 14,
+    "booking_max_per_day": 1,
+    "booking_min_minutes": 30,
+    "booking_max_hours": 14,
+    "booking_no_show_minutes": 30,
+    "booking_checkin_early_minutes": 60,
+    "visitor_bookings_enabled": True,
+    "employee_signup_domains": "",
 }
 
 DESCRIPTIONS = {
@@ -46,6 +55,14 @@ DESCRIPTIONS = {
     "max_parking_hours": "Sessions longer than this raise an overstay alert",
     "capacity_alerts_enabled": "Raise alerts when categories reach their threshold / capacity",
     "detection_retention_days": "Raw detections (not transactions) older than this are purged",
+    "booking_max_days_ahead": "Employees can reserve a slot at most this many days in advance",
+    "booking_max_per_day": "Reservations per employee per day (visitor bookings not counted)",
+    "booking_min_minutes": "Shortest reservation",
+    "booking_max_hours": "Longest single reservation",
+    "booking_no_show_minutes": "A reservation not checked in this many minutes after its start is released (no-show)",
+    "booking_checkin_early_minutes": "How early before the start a vehicle can be checked in",
+    "visitor_bookings_enabled": "Employees may reserve a slot for a visitor",
+    "employee_signup_domains": "Email domains allowed to self-register, comma-separated (e.g. company.com). Empty: only admins create employee accounts",
 }
 
 _cache: dict = {}

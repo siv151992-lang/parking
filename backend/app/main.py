@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .anpr.manager import camera_manager
-from .api import admin, alerts, auth, cameras, cameras_bulk, dashboard, detections, occupancy, reports, rows, transactions, users, vehicles
+from .api import admin, alerts, auth, cameras, cameras_bulk, dashboard, office_parking, detections, occupancy, reports, rows, transactions, users, vehicles
 from .config import BASE_DIR, settings
 from .database import SessionLocal, engine
 from .models import Alert, AlertType, ParkingSession, Role, SessionStatus, Severity, User, VehicleDetection
@@ -119,6 +119,8 @@ def maintenance_tick(state: dict):
                                  f"Inside since {s.entry_time:%Y-%m-%d %H:%M} UTC (session #{s.id}).",
                                  session_id=s.id, plate_number=s.plate_number, is_simulated=s.is_simulated,
                                  data={"reason": "overstay"})
+        from .services.bookings import sweep as booking_sweep
+        booking_sweep(db)
         if utcnow() - state.get("last_purge", utcnow() - timedelta(days=2)) > timedelta(hours=24):
             purge_old_detections(db, int(cfg["detection_retention_days"]))
             state["last_purge"] = utcnow()
@@ -194,7 +196,7 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins_list, all
                    allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Authorization", "Content-Type"])
 app.add_middleware(SecurityHeaders)
 
-for r in (auth, users, cameras, cameras_bulk, dashboard, transactions, vehicles, detections, occupancy, rows, reports, alerts, admin):
+for r in (auth, users, cameras, cameras_bulk, office_parking, dashboard, transactions, vehicles, detections, occupancy, rows, reports, alerts, admin):
     app.include_router(r.router)
 
 

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-RoleT = Literal["SUPER_ADMIN", "PARKING_MANAGER", "SECURITY_OPERATOR", "REPORT_VIEWER"]
+RoleT = Literal["SUPER_ADMIN", "PARKING_MANAGER", "SECURITY_OPERATOR", "REPORT_VIEWER", "EMPLOYEE"]
 DirectionT = Literal["ENTRY", "EXIT"]
 VehicleTypeT = Literal["CAR", "TWO_WHEELER", "COMMERCIAL"]
 
@@ -216,3 +216,118 @@ class RowUpdate(BaseModel):
 class RowCountIn(BaseModel):
     count: int = Field(ge=0, le=100000)
     reason: str = Field("", max_length=255)
+
+
+# ------------------------------------------------------- office parking
+HHMM = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+class OfficeIn(BaseModel):
+    name: str = Field(min_length=2, max_length=128)
+    city: str = Field("", max_length=64)
+    address: str = Field("", max_length=255)
+    latitude: float | None = Field(None, ge=-90, le=90)
+    longitude: float | None = Field(None, ge=-180, le=180)
+    is_24h: bool = False
+    open_time: str = Field("07:00", pattern=HHMM)
+    close_time: str = Field("22:00", pattern=HHMM)
+    is_active: bool = True
+    notes: str = Field("", max_length=2000)
+
+
+class OfficeUpdate(BaseModel):
+    name: str | None = Field(None, min_length=2, max_length=128)
+    city: str | None = Field(None, max_length=64)
+    address: str | None = Field(None, max_length=255)
+    latitude: float | None = Field(None, ge=-90, le=90)
+    longitude: float | None = Field(None, ge=-180, le=180)
+    is_24h: bool | None = None
+    open_time: str | None = Field(None, pattern=HHMM)
+    close_time: str | None = Field(None, pattern=HHMM)
+    is_active: bool | None = None
+    notes: str | None = Field(None, max_length=2000)
+
+
+class FloorIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    level: int = Field(0, ge=-20, le=200)
+
+
+class ZoneIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+
+
+class SlotsBulkIn(BaseModel):
+    """Create slots PREFIX + number, e.g. prefix "A-", start 1, count 20 -> A-01 ... A-20."""
+    prefix: str = Field("", max_length=16)
+    start: int = Field(1, ge=0, le=99999)
+    count: int = Field(1, ge=1, le=500)
+    digits: int = Field(2, ge=1, le=5)
+    vehicle_type: VehicleTypeT = "CAR"
+    is_ev: bool = False
+    is_accessible: bool = False
+    is_visitor: bool = False
+
+
+class SlotUpdate(BaseModel):
+    code: str | None = Field(None, min_length=1, max_length=32)
+    vehicle_type: VehicleTypeT | None = None
+    is_ev: bool | None = None
+    is_accessible: bool | None = None
+    is_visitor: bool | None = None
+    status: Literal["ACTIVE", "OUT_OF_SERVICE"] | None = None
+    assigned_user_id: int | None = None
+    zone_id: int | None = None
+
+
+class MyVehicleIn(BaseModel):
+    plate_number: str = Field(min_length=3, max_length=32)
+    vehicle_type: VehicleTypeT = "CAR"
+    notes: str = Field("", max_length=200)
+
+
+class VisitorIn(BaseModel):
+    name: str = Field(min_length=2, max_length=128)
+    plate_number: str = Field(min_length=3, max_length=32)
+    vehicle_type: VehicleTypeT = "CAR"
+    phone: str = Field("", max_length=32)
+
+
+class BookingIn(BaseModel):
+    office_id: int
+    start_at: datetime
+    end_at: datetime
+    vehicle_id: int | None = None
+    slot_id: int | None = None
+    visitor: VisitorIn | None = None
+    prefer_ev: bool = False
+    prefer_accessible: bool = False
+    notes: str = Field("", max_length=500)
+    user_id: int | None = None  # book for another person (bookings.manage)
+
+
+class BookingChangeIn(BaseModel):
+    start_at: datetime
+    end_at: datetime
+
+
+class BookingCancelIn(BaseModel):
+    reason: str = Field("", max_length=255)
+
+
+class ScanIn(BaseModel):
+    text: str = Field(min_length=1, max_length=200)
+
+
+class RegisterIn(BaseModel):
+    full_name: str = Field(min_length=2, max_length=128)
+    email: EmailStr
+    password: str = Field(max_length=256)
+    phone: str = Field("", max_length=32)
+    department: str = Field("", max_length=64)
+
+
+class ProfileIn(BaseModel):
+    full_name: str | None = Field(None, min_length=2, max_length=128)
+    phone: str | None = Field(None, max_length=32)
+    department: str | None = Field(None, max_length=64)
